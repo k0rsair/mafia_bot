@@ -1,0 +1,150 @@
+import { createBot } from './app/createBot.js';
+import { GameService } from './application/GameService.js';
+import { EphemeralPanelService } from './application/EphemeralPanelService.js';
+import { LobbyService } from './application/LobbyService.js';
+import { PhaseClock } from './application/PhaseClock.js';
+import { PhaseService } from './application/PhaseService.js';
+import { NightActionService } from './application/NightActionService.js';
+import { NightResolutionService } from './application/NightResolutionService.js';
+import { DayService } from './application/DayService.js';
+import { VotingService } from './application/VotingService.js';
+import { GameFinalizationService } from './application/GameFinalizationService.js';
+import { RecoveryService } from './application/RecoveryService.js';
+import { loadConfig } from './config/env.js';
+import { createPrismaClient } from './infrastructure/db/prisma.js';
+import { GameRepository } from './infrastructure/repositories/GameRepository.js';
+import { PhaseJobRepository } from './infrastructure/repositories/PhaseJobRepository.js';
+import { NightActionRepository } from './infrastructure/repositories/NightActionRepository.js';
+import { PlayerRepository } from './infrastructure/repositories/PlayerRepository.js';
+import { VoteRepository } from './infrastructure/repositories/VoteRepository.js';
+import { createLogger } from './observability/logger.js';
+import { TelegramEphemeralAdapter } from './bot/telegram/ephemeral.js';
+import { renderDayDiscussion } from './bot/views/dayView.js';
+import { renderNightControl, renderRoleControl } from './bot/views/phaseView.js';
+import { renderVoteOutcome } from './bot/views/voteView.js';
+import { renderFinalView } from './bot/views/finalView.js';
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const logger = createLogger(config);
+  const prisma = createPrismaClient(config, logger);
+  const gameRepository = new GameRepository(prisma, logger);
+  const playerRepository = new PlayerRepository(prisma, logger);
+  const phaseJobRepository = new PhaseJobRepository(prisma, logger);
+  const nightActionRepository = new NightActionRepository(prisma, logger);
+  const voteRepository = new VoteRepository(prisma, logger);
+  const lobbyService = new LobbyService(gameRepository, playerRepository, logger, config.lobbyMaxPlayers);
+  const gameService = new GameService(gameRepository, playerRepository, lobbyService, config, logger);
+  const nightResolutionService = new NightResolutionService(playerRepository, nightActionRepository, logger);
+  const votingService = new VotingService(gameRepository, playerRepository, voteRepository, logger);
+  const gameFinalizationService = new GameFinalizationService(gameRepository, playerRepository, logger);
+  const dayService = new DayService(playerRepository, logger);
+  const phaseService = new PhaseService(gameRepository, nightResolutionService, votingService, gameFinalizationService, config, logger);
+  const ephemeralAdapter = new TelegramEphemeralAdapter(config.botToken, logger);
+  const nightActionService = new NightActionService(gameRepository, playerRepository, nightActionRepository, ephemeralAdapter, logger);
+  const ephemeralPanelService = new EphemeralPanelService(gameRepository, playerRepository, phaseService, nightActionService, ephemeralAdapter, logger);
+  const bot = createBot(config, logger, {
+    lobbyService,
+    gameService,
+    ephemeralPanelService,
+    nightActionService,
+    dayService,
+    phaseService,
+    votingService,
+    gameFinalizationService,
+  });
+  const phaseClock = new PhaseClock(phaseJobRepository, phaseService, logger, async (result) => {
+    if (result.kind === 'ROLE_CONFIRMATION_EXPIRED') {
+      await bot.api.sendMessage(result.game.chatId, '⌛ Время подтверждения ролей истекло. Организатор может отменить игру или попросить игроков открыть панель снова.');
+    }
+    if (result.kind === 'NIGHT_RESOLVED') {
+      const text = result.resolution.eliminatedPlayer === null
+        ? '☀️ Рассвет. Этой ночью город никого не потерял.'
+        : `☀️ Рассвет. Ночью выбыл игрок: ${result.resolution.eliminatedPlayer.displayName}.`;
+      await bot.api.sendMessage(result.game.chatId, text);
+      await bot.api.sendMessage(result.game.chatId, renderDayDiscussion());
+    }
+    if (result.kind === 'DAY_VOTE_STARTED') {
+      const view = await dayService.renderVote(result.game);
+      const controlMessage = await bot.api.sendMessage(result.game.chatId, view.text, { reply_markup: view.replyMarkup });
+      await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+    }
+    if (result.kind === 'DAY_VOTE_RESOLVED') {
+      await bot.api.sendMessage(result.game.chatId, renderVoteOutcome({
+        outcome: result.resolution.resolution.outcome,
+        ...(result.resolution.eliminatedPlayer === null ? {} : { eliminatedDisplayName: result.resolution.eliminatedPlayer.displayName }),
+      }));
+      const nightView = renderNightControl(result.game.id, result.game.stateVersion);
+      const controlMessage = await bot.api.sendMessage(result.game.chatId, nightView.text, { reply_markup: nightView.replyMarkup });
+      await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+    }
+    if (result.kind === 'GAME_FINISHED') {
+      if (result.voteResolution !== undefined) {
+        await bot.api.sendMessage(result.game.chatId, renderVoteOutcome({
+          outcome: result.voteResolution.resolution.outcome,
+          ...(result.voteResolution.eliminatedPlayer === null ? {} : { eliminatedDisplayName: result.voteResolution.eliminatedPlayer.displayName }),
+        }));
+      }
+      if (result.nightResolution !== undefined) {
+        const dawnText = result.nightResolution.eliminatedPlayer === null
+          ? '☀️ Рассвет. Этой ночью город никого не потерял.'
+          : `☀️ Рассвет. Ночью выбыл игрок: ${result.nightResolution.eliminatedPlayer.displayName}.`;
+        await bot.api.sendMessage(result.game.chatId, dawnText);
+      }
+      await bot.api.sendMessage(result.game.chatId, renderFinalView(result.finalization));
+    }
+  });
+
+  logger.info(
+    {
+      botUsername: config.botUsername,
+      lobbyMaxPlayers: config.lobbyMaxPlayers,
+      logLevel: config.logLevel,
+    },
+    '[main] Starting Mafia game master polling',
+  );
+
+  const stop = (signal: string): void => {
+    logger.info({ signal }, '[main] Stopping Mafia game master polling');
+    bot.stop();
+  };
+
+  process.once('SIGINT', () => stop('SIGINT'));
+  process.once('SIGTERM', () => stop('SIGTERM'));
+
+  try {
+    const recoveryService = new RecoveryService(gameRepository, logger);
+    for (const game of await recoveryService.recoverActiveGames()) {
+      if (game.phase === 'ROLE_CONFIRMATION') {
+        const view = renderRoleControl(game.id, game.stateVersion);
+        const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
+        await gameRepository.setControlMessageId(game.id, message.message_id);
+      } else if (game.phase === 'NIGHT') {
+        const view = renderNightControl(game.id, game.stateVersion);
+        const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
+        await gameRepository.setControlMessageId(game.id, message.message_id);
+      } else if (game.phase === 'DAY_VOTE') {
+        const view = await dayService.renderVote(game);
+        const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
+        await gameRepository.setControlMessageId(game.id, message.message_id);
+      } else if (game.phase === 'DAY_DISCUSSION') {
+        const message = await bot.api.sendMessage(game.chatId, '☀️ Игра восстановлена. Обсуждение продолжается до сохранённого дедлайна.');
+        await gameRepository.setControlMessageId(game.id, message.message_id);
+      }
+    }
+    phaseClock.start();
+    await bot.start({
+      onStart: (botInfo) => logger.info({ botId: botInfo.id, botUsername: botInfo.username }, '[main] Polling started'),
+    });
+  } finally {
+    phaseClock.stop();
+    logger.info('[main] Disconnecting from database');
+    await prisma.$disconnect();
+  }
+}
+
+void main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`[main] Fatal startup error: ${message}\n`);
+  process.exitCode = 1;
+});

@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum GameStatus {
+  LOBBY
+  RUNNING
+  FINISHED
+  CANCELLED
+}
+
+enum GamePhase {
+  LOBBY
+  ROLE_CONFIRMATION
+  NIGHT
+  DAY_DISCUSSION
+  DAY_VOTE
+  FINISHED
+  CANCELLED
+}
+
+enum PlayerStatus {
+  LOBBY
+  ALIVE
+  DEAD
+  LEFT
+}
+
+enum Role {
+  MAFIA
+  COMMISSIONER
+  DOCTOR
+  CIVILIAN
+}
+
+enum NightActionType {
+  MAFIA_KILL
+  DOCTOR_SAVE
+  COMMISSIONER_CHECK
+}
+
+enum PhaseJobKind {
+  PHASE_DEADLINE
+}
+
+model GameChat {
+  id        String   @id
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  games     Game[]
+}
+
+model Game {
+  id               String        @id @default(cuid())
+  chatId           String
+  creatorId        String
+  status           GameStatus    @default(LOBBY)
+  phase            GamePhase     @default(LOBBY)
+  stateVersion     Int           @default(1)
+  phaseDeadline    DateTime?
+  lobbyMessageId   Int?
+  controlMessageId Int?
+  activeKey        String?       @unique
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  finishedAt       DateTime?
+  chat             GameChat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  players          Player[]
+  votes            Vote[]
+  nightActions     NightAction[]
+  phaseJobs        PhaseJob[]
+
+  @@index([chatId, status])
+  @@index([phaseDeadline])
+}
+
+model Player {
+  id                   String        @id @default(cuid())
+  gameId               String
+  userId               String
+  displayName          String
+  username             String?
+  status               PlayerStatus  @default(LOBBY)
+  role                 Role?
+  roleConfirmedAt      DateTime?
+  eliminatedAt         DateTime?
+  leftAt               DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  game                 Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  votesCast            Vote[]        @relation("VoteCaster")
+  votesReceived        Vote[]        @relation("VoteTarget")
+  nightActions         NightAction[] @relation("NightActionActor")
+  nightActionsTargeted NightAction[] @relation("NightActionTarget")
+
+  @@unique([gameId, userId])
+  @@index([gameId, status])
+}
+
+model Vote {
+  id             String   @id @default(cuid())
+  gameId         String
+  phaseVersion   Int
+  voterPlayerId  String
+  targetPlayerId String?
+  isSkip         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  game           Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  voter          Player   @relation("VoteCaster", fields: [voterPlayerId], references: [id], onDelete: Cascade)
+  target         Player?  @relation("VoteTarget", fields: [targetPlayerId], references: [id], onDelete: SetNull)
+
+  @@unique([gameId, phaseVersion, voterPlayerId])
+  @@index([gameId, phaseVersion])
+}
+
+model NightAction {
+  id             String          @id @default(cuid())
+  gameId         String
+  phaseVersion   Int
+  actionType     NightActionType
+  actorPlayerId  String
+  targetPlayerId String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  game           Game            @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  actor          Player          @relation("NightActionActor", fields: [actorPlayerId], references: [id], onDelete: Cascade)
+  target         Player          @relation("NightActionTarget", fields: [targetPlayerId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, phaseVersion, actorPlayerId, actionType])
+  @@index([gameId, phaseVersion])
+}
+
+model PhaseJob {
+  id           String       @id @default(cuid())
+  gameId       String
+  phaseVersion Int
+  kind         PhaseJobKind
+  dueAt        DateTime
+  processedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  game         Game         @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, phaseVersion, kind])
+  @@index([dueAt, processedAt])
+}

@@ -1,0 +1,125 @@
+import type { Game, Player } from '@prisma/client';
+
+import { MAX_PLAYERS, validateLobbySize } from '../domain/game/rules.js';
+import { GameRuleError } from '../domain/game/types.js';
+import type { AppLogger } from '../observability/logger.js';
+import type { GameRepository } from '../infrastructure/repositories/GameRepository.js';
+import type { PlayerRepository } from '../infrastructure/repositories/PlayerRepository.js';
+
+type LobbyUser = Readonly<{
+  userId: string;
+  displayName: string;
+  username?: string;
+}>;
+
+type CreateLobbyInput = LobbyUser & Readonly<{
+  chatId: string;
+  chatTitle?: string;
+  lobbyMessageId: number;
+}>;
+
+export type LobbySnapshot = Readonly<{
+  game: Game;
+  players: Player[];
+}>;
+
+export class LobbyError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'LobbyError';
+  }
+}
+
+export class LobbyService {
+  public constructor(
+    private readonly gameRepository: GameRepository,
+    private readonly playerRepository: PlayerRepository,
+    private readonly logger: AppLogger,
+    private readonly maxPlayers: number = MAX_PLAYERS,
+  ) {}
+
+  public async createLobby(input: CreateLobbyInput): Promise<LobbySnapshot> {
+    this.logger.debug({ chatId: input.chatId, creatorId: input.userId }, '[LobbyService.createLobby] Creating lobby');
+    const activeGame = await this.gameRepository.findActiveByChatId(input.chatId);
+    if (activeGame !== null) {
+      throw new LobbyError('В этом чате уже есть активная игра. Используйте /mafia_status.');
+    }
+
+    const game = await this.gameRepository.createLobby({
+      chatId: input.chatId,
+      creatorId: input.userId,
+      lobbyMessageId: input.lobbyMessageId,
+      ...(input.chatTitle === undefined ? {} : { chatTitle: input.chatTitle }),
+    });
+    const creator = await this.playerRepository.joinLobby({
+      gameId: game.id,
+      userId: input.userId,
+      displayName: input.displayName,
+      ...(input.username === undefined ? {} : { username: input.username }),
+    });
+
+    this.logger.info({ gameId: game.id, chatId: game.chatId }, '[LobbyService.createLobby] Lobby created with owner');
+    return { game, players: [creator] };
+  }
+
+  public async joinLobby(gameId: string, user: LobbyUser): Promise<LobbySnapshot> {
+    const snapshot = await this.getLobby(gameId);
+    const alreadyJoined = snapshot.players.some((player) => player.userId === user.userId);
+
+    if (!alreadyJoined && snapshot.players.length >= this.maxPlayers) {
+      throw new LobbyError(`В лобби максимум ${this.maxPlayers} игроков.`);
+    }
+
+    await this.playerRepository.joinLobby({ gameId, ...user });
+    const players = await this.playerRepository.listLobbyPlayers(gameId);
+
+    this.logger.info({ gameId, playerCount: players.length }, '[LobbyService.joinLobby] Lobby membership updated');
+    return { game: snapshot.game, players };
+  }
+
+  public async leaveLobby(gameId: string, userId: string): Promise<LobbySnapshot> {
+    const snapshot = await this.getLobby(gameId);
+    await this.playerRepository.leaveLobby(gameId, userId);
+    const players = await this.playerRepository.listLobbyPlayers(gameId);
+
+    this.logger.info({ gameId, playerCount: players.length }, '[LobbyService.leaveLobby] Lobby membership updated');
+    return { game: snapshot.game, players };
+  }
+
+  public async getLobby(gameId: string): Promise<LobbySnapshot> {
+    const game = await this.gameRepository.findById(gameId);
+    if (game === null || game.phase !== 'LOBBY') {
+      throw new LobbyError('Это лобби уже закрыто или устарело.');
+    }
+
+    const players = await this.playerRepository.listLobbyPlayers(gameId);
+    return { game, players };
+  }
+
+  public async getActiveLobby(chatId: string): Promise<LobbySnapshot | null> {
+    const game = await this.gameRepository.findActiveByChatId(chatId);
+    if (game === null || game.phase !== 'LOBBY') {
+      return null;
+    }
+
+    const players = await this.playerRepository.listLobbyPlayers(game.id);
+    return { game, players };
+  }
+
+  public async getActiveGame(chatId: string): Promise<Game | null> {
+    return this.gameRepository.findActiveByChatId(chatId);
+  }
+
+  public async validateStart(gameId: string): Promise<LobbySnapshot> {
+    const snapshot = await this.getLobby(gameId);
+    try {
+      validateLobbySize(snapshot.players.length);
+    } catch (error) {
+      const message = error instanceof GameRuleError ? error.message : 'Не удалось проверить состав лобби.';
+      throw new LobbyError(message);
+    }
+
+    this.logger.info({ gameId, playerCount: snapshot.players.length }, '[LobbyService.validateStart] Lobby is ready to start');
+    return snapshot;
+  }
+}
