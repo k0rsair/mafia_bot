@@ -76,6 +76,23 @@ export class PhaseService {
     return this.gameRepository.findById(gameId);
   }
 
+  public async completeNightIfAllActionsCompleted(gameId: string, phaseVersion: number): Promise<Extract<PhaseDeadlineResult, { kind: 'NIGHT_RESOLVED' | 'GAME_FINISHED' }> | null> {
+    const game = await this.gameRepository.findById(gameId);
+    if (game === null || game.phase !== 'NIGHT' || game.stateVersion !== phaseVersion) {
+      this.logger.debug({ gameId, phaseVersion }, '[FIX:early-night-completion] Ignored stale night completion check');
+      return null;
+    }
+
+    const progress = await this.nightResolutionService.getActionProgress(game.id, game.stateVersion);
+    if (!progress.allActionsCompleted) {
+      this.logger.debug({ gameId: game.id, phaseVersion: game.stateVersion, ...progress }, '[FIX:early-night-completion] Waiting for remaining night actions');
+      return null;
+    }
+
+    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion, ...progress }, '[FIX:early-night-completion] All night actions completed');
+    return this.resolveNightAndStartDay(game, 'all-actions-completed');
+  }
+
   public async processExpiredJob(job: PhaseJob): Promise<PhaseDeadlineResult | null> {
     this.logger.debug({ jobId: job.id, gameId: job.gameId, phaseVersion: job.phaseVersion }, '[PhaseService.processExpiredJob] Processing due phase job');
     const game = await this.gameRepository.findById(job.gameId);
@@ -90,25 +107,7 @@ export class PhaseService {
     }
 
     if (game.phase === 'NIGHT') {
-      const resolution = await this.nightResolutionService.resolve(game.id, game.stateVersion);
-      const finalization = await this.gameFinalizationService.finalizeIfWinner(game);
-      if (finalization !== null) {
-        return { game: finalization.game, kind: 'GAME_FINISHED', finalization, nightResolution: resolution };
-      }
-      const nextGame = await this.gameRepository.transitionPhase({
-        gameId: game.id,
-        currentPhase: 'NIGHT',
-        currentVersion: game.stateVersion,
-        nextPhase: 'DAY_DISCUSSION',
-        nextStatus: 'RUNNING',
-        deadline: new Date(Date.now() + this.config.dayDurationSeconds * 1000),
-      });
-      if (nextGame === null) {
-        return null;
-      }
-
-      this.logger.info({ gameId: nextGame.id, phase: nextGame.phase, wasEliminationApplied: resolution.eliminatedPlayer !== null }, '[PhaseService.processExpiredJob] Night transitioned to day discussion');
-      return { game: nextGame, kind: 'NIGHT_RESOLVED', resolution };
+      return this.resolveNightAndStartDay(game, 'deadline');
     }
 
     if (game.phase === 'DAY_DISCUSSION') {
@@ -155,5 +154,30 @@ export class PhaseService {
 
     this.logger.info({ gameId: nextGame.id, outcome: resolution.resolution.outcome }, '[PhaseService.closeDayVote] Day vote transitioned to night');
     return { game: nextGame, kind: 'DAY_VOTE_RESOLVED', resolution };
+  }
+
+  private async resolveNightAndStartDay(game: Game, trigger: 'deadline' | 'all-actions-completed'): Promise<Extract<PhaseDeadlineResult, { kind: 'NIGHT_RESOLVED' | 'GAME_FINISHED' }> | null> {
+    const resolution = await this.nightResolutionService.resolve(game.id, game.stateVersion);
+    const finalization = await this.gameFinalizationService.finalizeIfWinner(game);
+    if (finalization !== null) {
+      return { game: finalization.game, kind: 'GAME_FINISHED', finalization, nightResolution: resolution };
+    }
+    const nextGame = await this.gameRepository.transitionPhase({
+      gameId: game.id,
+      currentPhase: 'NIGHT',
+      currentVersion: game.stateVersion,
+      nextPhase: 'DAY_DISCUSSION',
+      nextStatus: 'RUNNING',
+      deadline: new Date(Date.now() + this.config.dayDurationSeconds * 1000),
+    });
+    if (nextGame === null) {
+      return null;
+    }
+
+    this.logger.info(
+      { gameId: nextGame.id, phase: nextGame.phase, trigger, wasEliminationApplied: resolution.eliminatedPlayer !== null },
+      '[FIX:early-night-completion] Night transitioned to day discussion',
+    );
+    return { game: nextGame, kind: 'NIGHT_RESOLVED', resolution };
   }
 }

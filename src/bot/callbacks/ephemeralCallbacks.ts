@@ -2,15 +2,19 @@ import type { Bot, Context } from 'grammy';
 
 import { EphemeralPanelError, type EphemeralPanelService } from '../../application/EphemeralPanelService.js';
 import { NightActionError, type NightActionService } from '../../application/NightActionService.js';
+import type { PhaseDeadlineResult, PhaseService } from '../../application/PhaseService.js';
 import type { AppLogger } from '../../observability/logger.js';
 import { isGameGroup } from '../authorization/chatPermissions.js';
 import { parseGameCallback } from './callbackData.js';
+import { renderDayDiscussion } from '../views/dayView.js';
+import { renderFinalView } from '../views/finalView.js';
 import { renderNightControl } from '../views/phaseView.js';
 
 export function registerEphemeralCallbacks(
   bot: Bot<Context>,
   panelService: EphemeralPanelService,
   nightActionService: NightActionService,
+  phaseService: PhaseService,
   logger: AppLogger,
 ): void {
   bot.callbackQuery(/^g:/, async (context) => {
@@ -40,13 +44,17 @@ export function registerEphemeralCallbacks(
           throw new NightActionError('Не удалось определить цель.');
         }
         await nightActionService.submitTarget({ ...input, targetIndex: callback.targetIndex });
+        const completion = await phaseService.completeNightIfAllActionsCompleted(callback.gameId, callback.phaseVersion);
         await context.answerCallbackQuery({ text: '✅ Выбор принят.' });
+        await publishNightCompletion(context, completion);
         return;
       }
 
       if (callback.action === 'mafia-confirm') {
         await nightActionService.confirmMafiaTarget(input);
+        const completion = await phaseService.completeNightIfAllActionsCompleted(callback.gameId, callback.phaseVersion);
         await context.answerCallbackQuery({ text: '✅ Голос мафии подтверждён.' });
+        await publishNightCompletion(context, completion);
         return;
       }
 
@@ -65,4 +73,28 @@ export function registerEphemeralCallbacks(
       await context.answerCallbackQuery({ text: `⚠️ ${text}`, show_alert: true });
     }
   });
+}
+
+async function publishNightCompletion(
+  context: Context,
+  completion: Extract<PhaseDeadlineResult, { kind: 'NIGHT_RESOLVED' | 'GAME_FINISHED' }> | null,
+): Promise<void> {
+  if (completion === null) {
+    return;
+  }
+
+  const resolution = completion.kind === 'GAME_FINISHED' ? completion.nightResolution : completion.resolution;
+  if (resolution === undefined) {
+    return;
+  }
+  const dawnText = resolution.eliminatedPlayer === null
+    ? '☀️ Рассвет. Этой ночью город никого не потерял.'
+    : `☀️ Рассвет. Ночью выбыл игрок: ${resolution.eliminatedPlayer.displayName}.`;
+  await context.reply(dawnText);
+  if (completion.kind === 'GAME_FINISHED') {
+    await context.reply(renderFinalView(completion.finalization));
+    return;
+  }
+
+  await context.reply(renderDayDiscussion());
 }

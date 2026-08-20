@@ -105,10 +105,12 @@ export class NightActionService {
       actorPlayerId: player.id,
       targetPlayerId: target.id,
     };
-    if (actionType === 'COMMISSIONER_CHECK') {
+    if (actionType === 'COMMISSIONER_CHECK' || actionType === 'DOCTOR_SAVE') {
       const created = await this.nightActionRepository.createSingleUseAction(actionInput);
       if (created === null) {
-        throw new NightActionError('Вы уже завершили проверку этой ночью.');
+        throw new NightActionError(actionType === 'COMMISSIONER_CHECK'
+          ? 'Вы уже завершили проверку этой ночью.'
+          : 'Вы уже выбрали, кого спасать этой ночью.');
       }
     } else {
       await this.nightActionRepository.upsertAction(actionInput);
@@ -123,7 +125,10 @@ export class NightActionService {
       callbackQueryId: input.callbackQueryId,
       text,
     });
-    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion, actionType }, '[FIX:commissioner-check-limit] Night target accepted');
+    this.logger.info(
+      { gameId: game.id, phaseVersion: game.stateVersion, actionType },
+      actionType === 'DOCTOR_SAVE' ? '[FIX:doctor-save-limit] Night target accepted' : '[FIX:commissioner-check-limit] Night target accepted',
+    );
   }
 
   public async confirmMafiaTarget(input: NightPanelInput): Promise<void> {

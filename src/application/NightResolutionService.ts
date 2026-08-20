@@ -10,6 +10,12 @@ export type AppliedNightResolution = Readonly<{
   eliminatedPlayer: Player | null;
 }>;
 
+export type NightActionProgress = Readonly<{
+  actionPlayersTotal: number;
+  actionPlayersCompleted: number;
+  allActionsCompleted: boolean;
+}>;
+
 export class NightResolutionService {
   public constructor(
     private readonly playerRepository: PlayerRepository,
@@ -42,4 +48,38 @@ export class NightResolutionService {
     );
     return { resolution, eliminatedPlayer };
   }
+
+  public async getActionProgress(gameId: string, phaseVersion: number): Promise<NightActionProgress> {
+    const [alivePlayers, actions] = await Promise.all([
+      this.playerRepository.listAlivePlayers(gameId),
+      this.nightActionRepository.listActions(gameId, phaseVersion),
+    ]);
+    const alivePlayersById = new Map(alivePlayers.map((player) => [player.id, player]));
+    const completedPlayerIds = new Set(actions.flatMap((action) => {
+      const actor = alivePlayersById.get(action.actorPlayerId);
+      return actor !== undefined && isCompletedActionForRole(actor, action) ? [actor.id] : [];
+    }));
+    const actionPlayers = alivePlayers.filter((player) => player.role !== null && player.role !== 'CIVILIAN');
+    const progress = {
+      actionPlayersTotal: actionPlayers.length,
+      actionPlayersCompleted: actionPlayers.filter((player) => completedPlayerIds.has(player.id)).length,
+      allActionsCompleted: actionPlayers.every((player) => completedPlayerIds.has(player.id)),
+    };
+
+    this.logger.info(
+      { gameId, phaseVersion, ...progress },
+      '[FIX:early-night-completion] Checked night action progress',
+    );
+    return progress;
+  }
+}
+
+function isCompletedActionForRole(player: Player, action: Awaited<ReturnType<NightActionRepository['listActions']>>[number]): boolean {
+  if (player.role === 'MAFIA') {
+    return action.actionType === 'MAFIA_KILL' && action.confirmedAt !== null;
+  }
+  if (player.role === 'DOCTOR') {
+    return action.actionType === 'DOCTOR_SAVE';
+  }
+  return player.role === 'COMMISSIONER' && action.actionType === 'COMMISSIONER_CHECK';
 }

@@ -109,14 +109,14 @@ export class NightActionRepository {
           targetPlayerId: input.targetPlayerId,
         },
       });
-      this.logger.info({ gameId: input.gameId, phaseVersion: input.phaseVersion }, '[FIX:commissioner-check-limit] Single-use night action recorded');
+      this.logger.info({ gameId: input.gameId, phaseVersion: input.phaseVersion }, '[FIX:single-use-night-action] Single-use night action recorded');
       return action;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        this.logger.warn({ gameId: input.gameId, phaseVersion: input.phaseVersion }, '[FIX:commissioner-check-limit] Rejected duplicate single-use night action');
+        this.logger.warn({ gameId: input.gameId, phaseVersion: input.phaseVersion }, '[FIX:single-use-night-action] Rejected duplicate single-use night action');
         return null;
       }
-      this.logger.error({ gameId: input.gameId, phaseVersion: input.phaseVersion, error }, '[FIX:commissioner-check-limit] Failed to record single-use night action');
+      this.logger.error({ gameId: input.gameId, phaseVersion: input.phaseVersion, error }, '[FIX:single-use-night-action] Failed to record single-use night action');
       throw error;
     }
   }

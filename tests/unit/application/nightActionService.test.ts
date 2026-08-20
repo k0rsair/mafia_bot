@@ -40,6 +40,34 @@ describe('NightActionService commissioner checks', () => {
     expect(sendText).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('Игрок 2') }));
   });
+
+  it('allows the doctor to save exactly one player per night', async () => {
+    const game = { id: 'game-1', chatId: '-1001', phase: 'NIGHT', stateVersion: 7 } as Game;
+    const doctor = { id: 'doctor-player', userId: 'user-1', role: 'DOCTOR', status: 'ALIVE' } as Player;
+    const firstTarget = { id: 'player-2', userId: 'user-2', displayName: 'Игрок 2', role: 'CIVILIAN', status: 'ALIVE' } as Player;
+    const secondTarget = { id: 'player-3', userId: 'user-3', displayName: 'Игрок 3', role: 'MAFIA', status: 'ALIVE' } as Player;
+    const createSingleUseAction = vi.fn().mockResolvedValueOnce({ id: 'action-1' }).mockResolvedValueOnce(null);
+    const sendText = vi.fn().mockResolvedValue({ ephemeral_message_id: 1 });
+    const service = new NightActionService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockResolvedValue(doctor),
+        listAlivePlayers: vi.fn().mockResolvedValue([doctor, firstTarget, secondTarget]),
+      } as unknown as PlayerRepository,
+      { createSingleUseAction, upsertAction: vi.fn() } as unknown as NightActionRepository,
+      { sendText } as unknown as TelegramEphemeralAdapter,
+      createLogger({ logLevel: 'silent' }),
+    );
+    const input = { gameId: game.id, phaseVersion: game.stateVersion, chatId: game.chatId, userId: doctor.userId, callbackQueryId: 'query-1' };
+
+    await service.submitTarget({ ...input, targetIndex: 1 });
+    await expect(service.submitTarget({ ...input, targetIndex: 2 })).rejects.toEqual(expect.objectContaining<Partial<NightActionError>>({
+      message: 'Вы уже выбрали, кого спасать этой ночью.',
+    }));
+
+    expect(createSingleUseAction).toHaveBeenCalledTimes(2);
+    expect(sendText).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('NightActionService mafia council', () => {
