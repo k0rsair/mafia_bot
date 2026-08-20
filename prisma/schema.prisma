@@ -127,6 +127,7 @@ model NightAction {
   actionType     NightActionType
   actorPlayerId  String
   targetPlayerId String
+  confirmedAt    DateTime?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   game           Game            @relation(fields: [gameId], references: [id], onDelete: Cascade)

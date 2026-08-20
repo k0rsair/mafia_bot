@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CallbackGuardError, CallbackGuardService } from '../../../src/application/CallbackGuardService.js';
-import { encodeNightTargetCallback, encodeVoteCallback, parseGameCallback, parseVoteCallback } from '../../../src/bot/callbacks/callbackData.js';
+import { encodeGameCallback, encodeNightTargetCallback, encodeVoteCallback, parseGameCallback, parseVoteCallback } from '../../../src/bot/callbacks/callbackData.js';
 import { TelegramEphemeralAdapter } from '../../../src/bot/telegram/ephemeral.js';
 import { renderNightPanel } from '../../../src/bot/views/ephemeralPanelView.js';
 import { renderRoleControl } from '../../../src/bot/views/phaseView.js';
@@ -43,6 +43,17 @@ describe('group-only private panels', () => {
     expect(Buffer.byteLength(voteCallback, 'utf8')).toBeLessThanOrEqual(64);
     expect(parseGameCallback(nightCallback)).toMatchObject({ action: 'target', targetIndex: 19 });
     expect(parseVoteCallback(voteCallback)).toMatchObject({ action: 'candidate', targetIndex: 19 });
+  });
+
+  it('supports a separate confirmation callback for a mafia draft', () => {
+    const callback = encodeGameCallback('game-id', 2, 'mafia-confirm');
+
+    expect(parseGameCallback(callback)).toMatchObject({
+      kind: 'game',
+      gameId: 'game-id',
+      phaseVersion: 2,
+      action: 'mafia-confirm',
+    });
   });
 
   it('preserves the original alive-player index when a role filters its target list', () => {

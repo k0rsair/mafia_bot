@@ -20,7 +20,8 @@ export class NightResolutionService {
   public async resolve(gameId: string, phaseVersion: number): Promise<AppliedNightResolution> {
     this.logger.debug({ gameId, phaseVersion }, '[NightResolutionService.resolve] Resolving night');
     const actions = await this.nightActionRepository.listActions(gameId, phaseVersion);
-    const resolution = resolveNight(actions);
+    const resolvedActions = actions.filter((action) => action.actionType !== 'MAFIA_KILL' || action.confirmedAt !== null);
+    const resolution = resolveNight(resolvedActions);
     const eliminatedPlayer = resolution.eliminatedPlayerId === null
       ? null
       : (await this.playerRepository.listAlivePlayers(gameId)).find((player) => player.id === resolution.eliminatedPlayerId) ?? null;
@@ -30,7 +31,13 @@ export class NightResolutionService {
     }
 
     this.logger.info(
-      { gameId, phaseVersion, actionCount: actions.length, wasEliminationApplied: eliminatedPlayer !== null },
+      {
+        gameId,
+        phaseVersion,
+        actionCount: actions.length,
+        confirmedMafiaActionCount: resolvedActions.filter((action) => action.actionType === 'MAFIA_KILL').length,
+        wasEliminationApplied: eliminatedPlayer !== null,
+      },
       '[NightResolutionService.resolve] Night resolved',
     );
     return { resolution, eliminatedPlayer };

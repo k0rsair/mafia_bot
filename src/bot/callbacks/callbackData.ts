@@ -1,6 +1,6 @@
 export type LobbyCallbackAction = 'join' | 'leave' | 'start';
 
-export type GameCallbackAction = 'panel' | 'confirm' | 'target';
+export type GameCallbackAction = 'panel' | 'confirm' | 'mafia-confirm' | 'target';
 
 export type GameCallback = Readonly<{
   kind: 'game';
@@ -101,7 +101,7 @@ function isLobbyAction(value: string | undefined): value is LobbyCallbackAction 
 }
 
 function isGameAction(value: string | undefined): value is GameCallbackAction {
-  return value === 'panel' || value === 'confirm' || value === 'target';
+  return value === 'panel' || value === 'confirm' || value === 'mafia-confirm' || value === 'target';
 }
 
 function encodeTargetIndex(index: number): string {

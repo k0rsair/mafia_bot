@@ -35,12 +35,48 @@ export function renderNightPanel(input: Readonly<{
   };
 }
 
+export function renderMafiaCouncilPanel(input: Readonly<{
+  gameId: string;
+  phaseVersion: number;
+  candidates: readonly Readonly<{ displayName: string; targetIndex: number }>[];
+  selections: readonly Readonly<{ actorDisplayName: string; targetDisplayName: string; confirmed: boolean }>[];
+  hasOwnDraft: boolean;
+  ownDraftConfirmed: boolean;
+}>): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
+  const selectionLines = input.selections.length === 0
+    ? ['Пока никто не выбрал цель.']
+    : input.selections.map((selection) => `• ${selection.actorDisplayName} → ${selection.targetDisplayName} ${selection.confirmed ? '✅' : '⏳'}`);
+  const targetRows = chunk(input.candidates.map((candidate) => ({
+    text: candidate.displayName.slice(0, 48),
+    callback_data: encodeNightTargetCallback(input.gameId, input.phaseVersion, candidate.targetIndex),
+  })), 2);
+  const confirmationRow = input.hasOwnDraft && !input.ownDraftConfirmed
+    ? [[{ text: '✅ Подтвердить мой выбор', callback_data: encodeGameCallback(input.gameId, input.phaseVersion, 'mafia-confirm') }]]
+    : [];
+  const refreshRow = [[{ text: '🔄 Обновить совет мафии', callback_data: encodeGameCallback(input.gameId, input.phaseVersion, 'panel') }]];
+
+  return {
+    text: [
+      '🕶️ Совет мафии',
+      'Выберите цель как черновик, обсудите выборы и подтвердите свой голос.',
+      '',
+      'Выборы мафии:',
+      ...selectionLines,
+      '',
+      input.ownDraftConfirmed
+        ? '✅ Ваш голос подтверждён. Новая цель снова сделает его черновиком.'
+        : '⏳ Убийство учитывает только подтверждённые голоса.',
+    ].join('\n'),
+    replyMarkup: { inline_keyboard: [...targetRows, ...confirmationRow, ...refreshRow] },
+  };
+}
+
 export function renderNightChoiceAccepted(): string {
   return '✅ Ночной выбор принят. До конца ночи его можно изменить из панели.';
 }
 
 export function renderCommissionerResult(displayName: string, isMafia: boolean): string {
-  return `🔍 Проверка: ${displayName} — ${isMafia ? 'МАФИЯ' : 'не мафия'}.`;
+  return `🔍 Проверка этой ночью: ${displayName} — ${isMafia ? 'МАФИЯ' : 'не мафия'}.`;
 }
 
 export function renderNoNightAction(): string {

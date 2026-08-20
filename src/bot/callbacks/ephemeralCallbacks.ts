@@ -44,6 +44,12 @@ export function registerEphemeralCallbacks(
         return;
       }
 
+      if (callback.action === 'mafia-confirm') {
+        await nightActionService.confirmMafiaTarget(input);
+        await context.answerCallbackQuery({ text: '✅ Голос мафии подтверждён.' });
+        return;
+      }
+
       const result = await panelService.confirmRole(input);
       await context.answerCallbackQuery({ text: '✅ Роль подтверждена.' });
       if (result.nightStarted && result.nightGame !== undefined) {

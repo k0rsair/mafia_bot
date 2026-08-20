@@ -2,6 +2,7 @@ import type { Game, Player } from '@prisma/client';
 
 import {
   renderCommissionerResult,
+  renderMafiaCouncilPanel,
   renderNightChoiceAccepted,
   renderNightPanel,
   renderNoNightAction,
@@ -52,6 +53,11 @@ export class NightActionService {
       return;
     }
 
+    if (player.role === 'MAFIA') {
+      await this.sendMafiaCouncilPanel(input, game, player);
+      return;
+    }
+
     const candidates = (await this.playerRepository.listAlivePlayers(game.id)).flatMap((candidate, targetIndex) =>
       candidate.role !== null && canRoleChooseTarget(player.role as Role, candidate.role as Role, candidate.id === player.id)
         ? [{ id: candidate.id, displayName: candidate.displayName, targetIndex }]
@@ -80,13 +86,33 @@ export class NightActionService {
     }
 
     const actionType = roleToActionType(player.role as Role);
-    await this.nightActionRepository.upsertAction({
+    if (actionType === 'MAFIA_KILL') {
+      await this.nightActionRepository.upsertMafiaDraft({
+        gameId: game.id,
+        phaseVersion: game.stateVersion,
+        actorPlayerId: player.id,
+        targetPlayerId: target.id,
+      });
+      await this.sendMafiaCouncilPanel(input, game, player);
+      this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion }, '[FIX:mafia-council] Mafia draft selected');
+      return;
+    }
+
+    const actionInput = {
       gameId: game.id,
       phaseVersion: game.stateVersion,
       actionType,
       actorPlayerId: player.id,
       targetPlayerId: target.id,
-    });
+    };
+    if (actionType === 'COMMISSIONER_CHECK') {
+      const created = await this.nightActionRepository.createSingleUseAction(actionInput);
+      if (created === null) {
+        throw new NightActionError('Вы уже завершили проверку этой ночью.');
+      }
+    } else {
+      await this.nightActionRepository.upsertAction(actionInput);
+    }
 
     const text = actionType === 'COMMISSIONER_CHECK'
       ? renderCommissionerResult(target.displayName, target.role === 'MAFIA')
@@ -97,7 +123,71 @@ export class NightActionService {
       callbackQueryId: input.callbackQueryId,
       text,
     });
-    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion, actionType }, '[NightActionService.submitTarget] Night target accepted');
+    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion, actionType }, '[FIX:commissioner-check-limit] Night target accepted');
+  }
+
+  public async confirmMafiaTarget(input: NightPanelInput): Promise<void> {
+    const { game, player } = await this.getNightPlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
+    if (player.role !== 'MAFIA') {
+      throw new NightActionError('Подтверждать общий выбор могут только мафии.');
+    }
+
+    if (!(await this.nightActionRepository.confirmMafiaDraft({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      actorPlayerId: player.id,
+    }))) {
+      throw new NightActionError('Сначала выберите цель или обновите совет мафии.');
+    }
+
+    await this.sendMafiaCouncilPanel(input, game, player);
+    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion }, '[FIX:mafia-council] Mafia draft confirmed');
+  }
+
+  private async sendMafiaCouncilPanel(input: NightPanelInput, game: Game, player: Player): Promise<void> {
+    const alivePlayers = await this.playerRepository.listAlivePlayers(game.id);
+    const candidates = alivePlayers.flatMap((candidate, targetIndex) =>
+      candidate.role !== null && canRoleChooseTarget('MAFIA', candidate.role as Role, candidate.id === player.id)
+        ? [{ displayName: candidate.displayName, targetIndex }]
+        : [],
+    );
+    const playerById = new Map(alivePlayers.map((alivePlayer) => [alivePlayer.id, alivePlayer]));
+    const selections = (await this.nightActionRepository.listActions(game.id, game.stateVersion)).flatMap((action) => {
+      if (action.actionType !== 'MAFIA_KILL') {
+        return [];
+      }
+      const actor = playerById.get(action.actorPlayerId);
+      const target = playerById.get(action.targetPlayerId);
+      if (actor === undefined || target === undefined || actor.role !== 'MAFIA') {
+        return [];
+      }
+      return [{
+        actorPlayerId: actor.id,
+        actorDisplayName: actor.displayName,
+        targetDisplayName: target.displayName,
+        confirmed: action.confirmedAt !== null,
+      }];
+    });
+    const ownSelection = selections.find((selection) => selection.actorPlayerId === player.id);
+    const panel = renderMafiaCouncilPanel({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      candidates,
+      selections,
+      hasOwnDraft: ownSelection !== undefined,
+      ownDraftConfirmed: ownSelection?.confirmed ?? false,
+    });
+    await this.ephemeralAdapter.sendText({
+      chatId: input.chatId,
+      receiverUserId: input.userId,
+      callbackQueryId: input.callbackQueryId,
+      text: panel.text,
+      replyMarkup: panel.replyMarkup,
+    });
+    this.logger.debug(
+      { gameId: game.id, phase: game.phase, candidateCount: candidates.length, mafiaDraftCount: selections.length, confirmedMafiaDraftCount: selections.filter((selection) => selection.confirmed).length },
+      '[FIX:mafia-council] Mafia council panel opened',
+    );
   }
 
   private async getNightPlayer(gameId: string, phaseVersion: number, chatId: string, userId: string): Promise<Readonly<{ game: Game; player: Player }>> {
