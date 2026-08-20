@@ -68,6 +68,10 @@ export class PhaseService {
     });
   }
 
+  public async startDayVote(game: Game): Promise<Game | null> {
+    return this.transitionToDayVote(game, 'manual');
+  }
+
   public async recordControlMessage(gameId: string, messageId: number): Promise<void> {
     await this.gameRepository.setControlMessageId(gameId, messageId);
   }
@@ -111,14 +115,7 @@ export class PhaseService {
     }
 
     if (game.phase === 'DAY_DISCUSSION') {
-      const nextGame = await this.gameRepository.transitionPhase({
-        gameId: game.id,
-        currentPhase: 'DAY_DISCUSSION',
-        currentVersion: game.stateVersion,
-        nextPhase: 'DAY_VOTE',
-        nextStatus: 'RUNNING',
-        deadline: new Date(Date.now() + this.config.voteDurationSeconds * 1000),
-      });
+      const nextGame = await this.transitionToDayVote(game, 'deadline');
       return nextGame === null ? null : { game: nextGame, kind: 'DAY_VOTE_STARTED' };
     }
 
@@ -179,5 +176,27 @@ export class PhaseService {
       '[FIX:early-night-completion] Night transitioned to day discussion',
     );
     return { game: nextGame, kind: 'NIGHT_RESOLVED', resolution };
+  }
+
+  private async transitionToDayVote(game: Game, trigger: 'manual' | 'deadline'): Promise<Game | null> {
+    if (game.phase !== 'DAY_DISCUSSION') {
+      return null;
+    }
+
+    const nextGame = await this.gameRepository.transitionPhase({
+      gameId: game.id,
+      currentPhase: 'DAY_DISCUSSION',
+      currentVersion: game.stateVersion,
+      nextPhase: 'DAY_VOTE',
+      nextStatus: 'RUNNING',
+      deadline: new Date(Date.now() + this.config.voteDurationSeconds * 1000),
+    });
+    if (nextGame !== null) {
+      this.logger.info(
+        { gameId: nextGame.id, phase: nextGame.phase, trigger },
+        '[FIX:manual-vote-start] Day vote started',
+      );
+    }
+    return nextGame;
   }
 }

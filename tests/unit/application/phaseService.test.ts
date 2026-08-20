@@ -71,3 +71,52 @@ describe('PhaseService early night completion', () => {
     expect(transitionPhase).not.toHaveBeenCalled();
   });
 });
+
+describe('PhaseService manual day vote start', () => {
+  const config = {
+    roleConfirmationDurationSeconds: 300,
+    nightDurationSeconds: 120,
+    dayDurationSeconds: 180,
+    voteDurationSeconds: 90,
+  };
+
+  it('transitions from discussion to voting with a fresh vote deadline', async () => {
+    const game = { id: 'game-1', phase: 'DAY_DISCUSSION', stateVersion: 7, status: 'RUNNING' } as Game;
+    const voteGame = { ...game, phase: 'DAY_VOTE', stateVersion: 8 } as Game;
+    const transitionPhase = vi.fn().mockResolvedValue(voteGame);
+    const service = new PhaseService(
+      { transitionPhase } as unknown as GameRepository,
+      {} as NightResolutionService,
+      {} as VotingService,
+      {} as GameFinalizationService,
+      config,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await expect(service.startDayVote(game)).resolves.toEqual(voteGame);
+
+    expect(transitionPhase).toHaveBeenCalledWith(expect.objectContaining({
+      gameId: game.id,
+      currentPhase: 'DAY_DISCUSSION',
+      currentVersion: game.stateVersion,
+      nextPhase: 'DAY_VOTE',
+      deadline: expect.any(Date),
+    }));
+  });
+
+  it('does not start voting outside the discussion phase', async () => {
+    const transitionPhase = vi.fn();
+    const service = new PhaseService(
+      { transitionPhase } as unknown as GameRepository,
+      {} as NightResolutionService,
+      {} as VotingService,
+      {} as GameFinalizationService,
+      config,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await expect(service.startDayVote({ phase: 'NIGHT' } as Game)).resolves.toBeNull();
+
+    expect(transitionPhase).not.toHaveBeenCalled();
+  });
+});

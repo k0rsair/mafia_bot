@@ -74,6 +74,34 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
     await startGameFromContext(context, dependencies);
   });
 
+  bot.command('startvote', async (context) => {
+    if (!isGameGroup(context) || context.chat === undefined || context.from === undefined) {
+      await context.reply('👥 Эта команда доступна только в игровом групповом чате.');
+      return;
+    }
+
+    const game = await dependencies.lobbyService.getActiveGame(String(context.chat.id));
+    if (game === null || game.phase !== 'DAY_DISCUSSION') {
+      await context.reply('ℹ️ Запустить голосование можно только во время дневного обсуждения.');
+      return;
+    }
+    if (!(await canManageGame(context, game.creatorId, dependencies.logger))) {
+      await context.reply('🛡️ Запустить голосование может только автор лобби или администратор чата.');
+      return;
+    }
+
+    const voteGame = await dependencies.phaseService.startDayVote(game);
+    if (voteGame === null) {
+      await context.reply('⚠️ Фаза уже изменилась. Проверьте /mafia_status.');
+      return;
+    }
+
+    dependencies.logger.info({ gameId: voteGame.id, chatId: voteGame.chatId }, '[FIX:manual-vote-start] Organizer started day vote');
+    const view = await dependencies.dayService.renderVote(voteGame);
+    const controlMessage = await context.reply(`🗳️ Организатор завершил обсуждение. Голосование начинается!\n\n${view.text}`, { reply_markup: view.replyMarkup });
+    await dependencies.phaseService.recordControlMessage(voteGame.id, controlMessage.message_id);
+  });
+
   bot.command('cancelgame', async (context) => {
     if (!isGameGroup(context) || context.chat === undefined || context.from === undefined) {
       await context.reply('👥 Эта команда доступна только в игровом групповом чате.');

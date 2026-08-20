@@ -40,7 +40,7 @@ export function createBot(config: AppConfig, logger: AppLogger, dependencies: Bo
 
   bot.command('help', async (context) => {
     logger.info({ chatId: String(context.chat.id), userId: String(context.from?.id) }, '[createBot.help] Received /help command');
-    await context.reply('🎲 Команды: /mafia, /startgame, /mafia_status, /extendroles и /cancelgame. Тайные роли и действия откроются в скрытой панели прямо в группе.');
+    await context.reply('🎲 Команды: /mafia, /startgame, /startvote, /mafia_status, /extendroles и /cancelgame. Тайные роли и действия откроются в скрытой панели прямо в группе.');
   });
 
   registerLobbyHandlers(bot, {
