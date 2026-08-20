@@ -1,0 +1,28 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { BOT_COMMANDS, registerCommandMenu } from '../../../src/bot/commands/commandMenu.js';
+import { createLogger } from '../../../src/observability/logger.js';
+
+describe('Telegram command menu', () => {
+  it('lists every command handled by the bot', () => {
+    expect(BOT_COMMANDS.map((command) => command.command)).toEqual([
+      'mafia',
+      'startgame',
+      'startvote',
+      'mafia_status',
+      'extendroles',
+      'cancelgame',
+      'help',
+      'start',
+    ]);
+    expect(new Set(BOT_COMMANDS.map((command) => command.command)).size).toBe(BOT_COMMANDS.length);
+  });
+
+  it('sends the menu to Telegram without preventing startup on an API error', async () => {
+    const setMyCommands = vi.fn().mockRejectedValue(new Error('temporary API error'));
+
+    await expect(registerCommandMenu({ setMyCommands }, createLogger({ logLevel: 'silent' }))).resolves.toBeUndefined();
+
+    expect(setMyCommands).toHaveBeenCalledWith(BOT_COMMANDS);
+  });
+});

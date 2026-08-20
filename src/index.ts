@@ -23,6 +23,7 @@ import { renderDayDiscussion } from './bot/views/dayView.js';
 import { renderNightControl, renderRoleControl } from './bot/views/phaseView.js';
 import { renderVoteOutcome } from './bot/views/voteView.js';
 import { renderFinalView } from './bot/views/finalView.js';
+import { registerCommandMenu } from './bot/commands/commandMenu.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
     votingService,
     gameFinalizationService,
   });
+  await registerCommandMenu(bot.api, logger);
   const phaseClock = new PhaseClock(phaseJobRepository, phaseService, logger, async (result) => {
     if (result.kind === 'ROLE_CONFIRMATION_EXPIRED') {
       await bot.api.sendMessage(result.game.chatId, '⌛ Время подтверждения ролей истекло. Организатор может отменить игру или попросить игроков открыть панель снова.');
