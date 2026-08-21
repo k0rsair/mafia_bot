@@ -131,12 +131,22 @@ export class NightActionService {
     const text = actionType === 'COMMISSIONER_CHECK'
       ? renderCommissionerResult(target.displayName, target.role === 'MAFIA')
       : renderNightChoiceAccepted();
-    await this.ephemeralAdapter.sendText({
-      chatId: input.chatId,
-      receiverUserId: input.userId,
-      callbackQueryId: input.callbackQueryId,
-      text,
-    });
+    if (actionType === 'COMMISSIONER_CHECK' && input.ephemeralMessageId !== undefined) {
+      await this.ephemeralAdapter.editText({
+        chatId: input.chatId,
+        receiverUserId: input.userId,
+        ephemeralMessageId: input.ephemeralMessageId,
+        text,
+        replyMarkup: { inline_keyboard: [] },
+      });
+    } else {
+      await this.ephemeralAdapter.sendText({
+        chatId: input.chatId,
+        receiverUserId: input.userId,
+        callbackQueryId: input.callbackQueryId,
+        text,
+      });
+    }
     this.logger.info(
       { gameId: game.id, phaseVersion: game.stateVersion, actionType },
       actionType === 'DOCTOR_SAVE' ? '[FIX:doctor-save-limit] Night target accepted' : '[FIX:commissioner-check-limit] Night target accepted',

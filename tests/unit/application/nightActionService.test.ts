@@ -9,6 +9,43 @@ import type { PlayerRepository } from '../../../src/infrastructure/repositories/
 import { createLogger } from '../../../src/observability/logger.js';
 
 describe('NightActionService commissioner checks', () => {
+  it('replaces the commissioner panel with the check result and removes its buttons', async () => {
+    const game = { id: 'game-1', chatId: '-1001', phase: 'NIGHT', stateVersion: 7 } as Game;
+    const commissioner = { id: 'commissioner-player', userId: 'user-1', role: 'COMMISSIONER', status: 'ALIVE' } as Player;
+    const target = { id: 'player-2', userId: 'user-2', displayName: 'Игрок 2', role: 'MAFIA', status: 'ALIVE' } as Player;
+    const sendText = vi.fn();
+    const editText = vi.fn().mockResolvedValue(undefined);
+    const service = new NightActionService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockResolvedValue(commissioner),
+        listAlivePlayers: vi.fn().mockResolvedValue([commissioner, target]),
+      } as unknown as PlayerRepository,
+      { createSingleUseAction: vi.fn().mockResolvedValue({ id: 'action-1' }) } as unknown as NightActionRepository,
+      { sendText, editText } as unknown as TelegramEphemeralAdapter,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await service.submitTarget({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      chatId: game.chatId,
+      userId: commissioner.userId,
+      callbackQueryId: 'query-1',
+      ephemeralMessageId: 42,
+      targetIndex: 1,
+    });
+
+    expect(editText).toHaveBeenCalledWith({
+      chatId: game.chatId,
+      receiverUserId: commissioner.userId,
+      ephemeralMessageId: 42,
+      text: expect.stringContaining('Игрок 2 — МАФИЯ'),
+      replyMarkup: { inline_keyboard: [] },
+    });
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
   it('allows exactly one revealed commissioner check per night', async () => {
     const game = { id: 'game-1', chatId: '-1001', phase: 'NIGHT', stateVersion: 7 } as Game;
     const commissioner = { id: 'commissioner-player', userId: 'user-1', role: 'COMMISSIONER', status: 'ALIVE' } as Player;
