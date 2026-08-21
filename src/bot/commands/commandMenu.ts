@@ -7,6 +7,8 @@ export const BOT_COMMANDS: readonly BotCommand[] = [
   { command: 'startgame', description: 'Начать игру' },
   { command: 'startvote', description: 'Начать голосование' },
   { command: 'mafia_status', description: 'Показать текущую фазу' },
+  { command: 'roles_pending', description: 'Кто не подтвердил роль' },
+  { command: 'restore_panel', description: 'Вернуть личную панель' },
   { command: 'extendroles', description: 'Продлить подтверждение ролей' },
   { command: 'cancelgame', description: 'Отменить игру (нужно confirm)' },
   { command: 'help', description: 'Показать справку' },

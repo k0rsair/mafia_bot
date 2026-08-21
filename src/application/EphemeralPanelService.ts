@@ -16,6 +16,18 @@ export class EphemeralPanelError extends Error {
   }
 }
 
+type PanelInput = Readonly<{
+  gameId: string;
+  phaseVersion: number;
+  chatId: string;
+  userId: string;
+  callbackQueryId?: string;
+}>;
+
+type PanelCallbackInput = PanelInput & Readonly<{
+  callbackQueryId: string;
+}>;
+
 export class EphemeralPanelService {
   public constructor(
     private readonly gameRepository: GameRepository,
@@ -27,7 +39,7 @@ export class EphemeralPanelService {
     private readonly callbackGuard: CallbackGuardService = new CallbackGuardService(),
   ) {}
 
-  public async openPanel(input: Readonly<{ gameId: string; phaseVersion: number; chatId: string; userId: string; callbackQueryId: string }>): Promise<void> {
+  public async openPanel(input: PanelCallbackInput): Promise<void> {
     const game = await this.gameRepository.findById(input.gameId);
     if (game?.phase === 'NIGHT' && game.stateVersion === input.phaseVersion) {
       await this.nightActionService.openNightPanel(input);
@@ -37,7 +49,30 @@ export class EphemeralPanelService {
     await this.openRolePanel(input);
   }
 
-  private async openRolePanel(input: Readonly<{ gameId: string; phaseVersion: number; chatId: string; userId: string; callbackQueryId: string }>): Promise<void> {
+  public async restorePanel(input: Readonly<{ gameId: string; chatId: string; userId: string }>): Promise<void> {
+    this.logger.debug({ gameId: input.gameId, chatId: input.chatId, userId: input.userId }, '[EphemeralPanelService.restorePanel] Restoring personal panel');
+    const game = await this.gameRepository.findById(input.gameId);
+    if (game === null) {
+      this.logger.warn({ gameId: input.gameId, chatId: input.chatId, userId: input.userId }, '[EphemeralPanelService.restorePanel] Game was not found');
+      throw new EphemeralPanelError('Активная игра не найдена.');
+    }
+
+    const panelInput = { ...input, phaseVersion: game.stateVersion };
+    if (game.phase === 'NIGHT') {
+      await this.nightActionService.openNightPanel(panelInput);
+      this.logger.info({ gameId: game.id, phase: game.phase }, '[EphemeralPanelService.restorePanel] Personal panel restored');
+      return;
+    }
+    if (game.phase !== 'ROLE_CONFIRMATION') {
+      this.logger.warn({ gameId: game.id, phase: game.phase }, '[EphemeralPanelService.restorePanel] Panel restoration rejected outside private-panel phase');
+      throw new EphemeralPanelError('Личную панель можно восстановить только во время подтверждения ролей или ночью.');
+    }
+
+    await this.openRolePanel(panelInput);
+    this.logger.info({ gameId: game.id, phase: game.phase }, '[EphemeralPanelService.restorePanel] Personal panel restored');
+  }
+
+  private async openRolePanel(input: PanelInput): Promise<void> {
     const { game, player } = await this.getRoleConfirmationPlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
     if (player.role === null) {
       throw new EphemeralPanelError('Роль ещё не назначена. Попробуйте позже.');
@@ -47,14 +82,14 @@ export class EphemeralPanelService {
     await this.ephemeralAdapter.sendText({
       chatId: input.chatId,
       receiverUserId: input.userId,
-      callbackQueryId: input.callbackQueryId,
+      ...(input.callbackQueryId === undefined ? {} : { callbackQueryId: input.callbackQueryId }),
       text: panel.text,
       replyMarkup: panel.replyMarkup,
     });
     this.logger.debug({ gameId: game.id, phase: game.phase }, '[EphemeralPanelService.openRolePanel] Role panel opened');
   }
 
-  public async confirmRole(input: Readonly<{ gameId: string; phaseVersion: number; chatId: string; userId: string; callbackQueryId: string }>): Promise<Readonly<{ nightStarted: boolean; nightGame?: Game }>> {
+  public async confirmRole(input: PanelCallbackInput): Promise<Readonly<{ nightStarted: boolean; nightGame?: Game }>> {
     const { game, player } = await this.getRoleConfirmationPlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
     const confirmed = await this.playerRepository.confirmRole(game.id, player.userId);
     const confirmedCount = await this.playerRepository.countRoleConfirmations(game.id);

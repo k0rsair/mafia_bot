@@ -1,14 +1,17 @@
 import type { Bot, Context } from 'grammy';
 
 import { GameStartError, type GameService } from '../../application/GameService.js';
+import { EphemeralPanelError, type EphemeralPanelService } from '../../application/EphemeralPanelService.js';
 import type { GameFinalizationService } from '../../application/GameFinalizationService.js';
 import type { PhaseService } from '../../application/PhaseService.js';
 import type { DayService } from '../../application/DayService.js';
 import { LobbyError, type LobbyService, type LobbySnapshot } from '../../application/LobbyService.js';
+import { NightActionError } from '../../application/NightActionService.js';
 import type { AppConfig } from '../../config/env.js';
 import type { AppLogger } from '../../observability/logger.js';
 import { canManageGame, isGameGroup } from '../authorization/chatPermissions.js';
 import { parseLobbyCallback } from '../callbacks/callbackData.js';
+import type { TelegramEphemeralAdapter } from '../telegram/ephemeral.js';
 import { renderLobby } from '../views/lobbyView.js';
 import { renderNightControl, renderRoleControl } from '../views/phaseView.js';
 
@@ -18,6 +21,8 @@ type LobbyHandlerDependencies = Readonly<{
   phaseService: PhaseService;
   dayService: DayService;
   gameFinalizationService: GameFinalizationService;
+  ephemeralPanelService: EphemeralPanelService;
+  ephemeralAdapter: TelegramEphemeralAdapter;
   config: Pick<AppConfig, 'lobbyMaxPlayers'>;
   logger: AppLogger;
 }>;
@@ -68,6 +73,68 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
     }
 
     await context.reply(renderLobby({ gameId: lobby.game.id, players: lobby.players, maxPlayers: dependencies.config.lobbyMaxPlayers }).text);
+  });
+
+  bot.command('roles_pending', async (context) => {
+    if (!isGameGroup(context) || context.chat === undefined || context.from === undefined) {
+      await context.reply('👥 Эта команда доступна только в игровом групповом чате.');
+      return;
+    }
+
+    const game = await dependencies.lobbyService.getActiveGame(String(context.chat.id));
+    if (game === null || game.phase !== 'ROLE_CONFIRMATION') {
+      await context.reply('ℹ️ Сейчас нет фазы подтверждения ролей.');
+      return;
+    }
+    if (!(await canManageGame(context, game.creatorId, dependencies.logger))) {
+      dependencies.logger.warn({ gameId: game.id, chatId: game.chatId }, '[registerLobbyHandlers.rolesPending] Rejected non-manager request');
+      await context.reply('🛡️ Список ожидающих подтверждения доступен только автору лобби или администратору чата.');
+      return;
+    }
+
+    try {
+      const players = await dependencies.lobbyService.listUnconfirmedRolePlayers(game.id);
+      const text = players.length === 0
+        ? '✅ Все игроки подтвердили получение роли.'
+        : ['⌛ Ещё не подтвердили получение роли:', ...players.map((player, index) => `${index + 1}. ${player.displayName}`)].join('\n');
+      await dependencies.ephemeralAdapter.sendText({
+        chatId: String(context.chat.id),
+        receiverUserId: String(context.from.id),
+        text,
+      });
+      dependencies.logger.info(
+        { gameId: game.id, chatId: game.chatId, phase: game.phase, pendingCount: players.length },
+        '[registerLobbyHandlers.rolesPending] Sent pending role confirmations',
+      );
+    } catch (error) {
+      dependencies.logger.error({ gameId: game.id, chatId: game.chatId, error }, '[registerLobbyHandlers.rolesPending] Failed to send pending role confirmations');
+      await context.reply(`⚠️ ${toUserMessage(error)}`);
+    }
+  });
+
+  bot.command('restore_panel', async (context) => {
+    if (!isGameGroup(context) || context.chat === undefined || context.from === undefined) {
+      await context.reply('👥 Эта команда доступна только в игровом групповом чате.');
+      return;
+    }
+
+    const game = await dependencies.lobbyService.getActiveGame(String(context.chat.id));
+    if (game === null) {
+      await context.reply('ℹ️ Активной игры нет.');
+      return;
+    }
+
+    try {
+      await dependencies.ephemeralPanelService.restorePanel({
+        gameId: game.id,
+        chatId: String(context.chat.id),
+        userId: String(context.from.id),
+      });
+      dependencies.logger.info({ gameId: game.id, chatId: game.chatId, phase: game.phase }, '[registerLobbyHandlers.restorePanel] Restored personal panel');
+    } catch (error) {
+      dependencies.logger.warn({ gameId: game.id, chatId: game.chatId, phase: game.phase, error }, '[registerLobbyHandlers.restorePanel] Panel restoration rejected');
+      await context.reply(`⚠️ ${toUserMessage(error)}`);
+    }
   });
 
   bot.command('startgame', async (context) => {
@@ -282,7 +349,7 @@ function getLobbyUser(context: Context): Readonly<{ userId: string; displayName:
 }
 
 function toUserMessage(error: unknown): string {
-  if (error instanceof LobbyError || error instanceof GameStartError) {
+  if (error instanceof LobbyError || error instanceof GameStartError || error instanceof EphemeralPanelError || error instanceof NightActionError) {
     return error.message;
   }
 

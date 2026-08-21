@@ -4,7 +4,7 @@ import { MAX_PLAYERS, validateLobbySize } from '../domain/game/rules.js';
 import { GameRuleError } from '../domain/game/types.js';
 import type { AppLogger } from '../observability/logger.js';
 import type { GameRepository } from '../infrastructure/repositories/GameRepository.js';
-import type { PlayerRepository } from '../infrastructure/repositories/PlayerRepository.js';
+import type { PlayerRepository, UnconfirmedRolePlayer } from '../infrastructure/repositories/PlayerRepository.js';
 
 type LobbyUser = Readonly<{
   userId: string;
@@ -108,6 +108,19 @@ export class LobbyService {
 
   public async getActiveGame(chatId: string): Promise<Game | null> {
     return this.gameRepository.findActiveByChatId(chatId);
+  }
+
+  public async listUnconfirmedRolePlayers(gameId: string): Promise<UnconfirmedRolePlayer[]> {
+    this.logger.debug({ gameId }, '[LobbyService.listUnconfirmedRolePlayers] Checking role confirmation phase');
+    const game = await this.gameRepository.findById(gameId);
+    if (game === null || game.phase !== 'ROLE_CONFIRMATION') {
+      this.logger.warn({ gameId, phase: game?.phase }, '[LobbyService.listUnconfirmedRolePlayers] Rejected request outside role confirmation');
+      throw new LobbyError('Сейчас нет фазы подтверждения ролей.');
+    }
+
+    const players = await this.playerRepository.listUnconfirmedRolePlayers(gameId);
+    this.logger.info({ gameId, pendingCount: players.length }, '[LobbyService.listUnconfirmedRolePlayers] Loaded pending role confirmations');
+    return players;
   }
 
   public async validateStart(gameId: string): Promise<LobbySnapshot> {

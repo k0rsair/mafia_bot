@@ -53,6 +53,7 @@ async function main(): Promise<void> {
     phaseService,
     votingService,
     gameFinalizationService,
+    ephemeralAdapter,
   });
   await registerCommandMenu(bot.api, logger);
   const phaseClock = new PhaseClock(phaseJobRepository, phaseService, logger, async (result) => {

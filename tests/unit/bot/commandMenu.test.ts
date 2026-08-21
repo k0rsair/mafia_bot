@@ -10,6 +10,8 @@ describe('Telegram command menu', () => {
       'startgame',
       'startvote',
       'mafia_status',
+      'roles_pending',
+      'restore_panel',
       'extendroles',
       'cancelgame',
       'help',

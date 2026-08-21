@@ -10,6 +10,11 @@ type LobbyPlayerInput = Readonly<{
   username?: string;
 }>;
 
+export type UnconfirmedRolePlayer = Readonly<{
+  userId: string;
+  displayName: string;
+}>;
+
 export class PlayerRepository {
   public constructor(
     private readonly prisma: PrismaClient,
@@ -69,6 +74,18 @@ export class PlayerRepository {
       where: { gameId, status: DbPlayerStatus.ALIVE },
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  public async listUnconfirmedRolePlayers(gameId: string): Promise<UnconfirmedRolePlayer[]> {
+    this.logger.debug({ gameId }, '[PlayerRepository.listUnconfirmedRolePlayers] Fetching players without role confirmation');
+    const players = await this.prisma.player.findMany({
+      where: { gameId, status: DbPlayerStatus.ALIVE, roleConfirmedAt: null },
+      orderBy: { createdAt: 'asc' },
+      select: { userId: true, displayName: true },
+    });
+
+    this.logger.info({ gameId, pendingCount: players.length }, '[PlayerRepository.listUnconfirmedRolePlayers] Loaded pending role confirmations');
+    return players;
   }
 
   public async listPlayers(gameId: string): Promise<Player[]> {

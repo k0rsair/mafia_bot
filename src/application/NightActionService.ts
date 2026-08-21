@@ -28,6 +28,10 @@ type NightPanelInput = Readonly<{
   phaseVersion: number;
   chatId: string;
   userId: string;
+  callbackQueryId?: string;
+}>;
+
+type NightCallbackInput = NightPanelInput & Readonly<{
   callbackQueryId: string;
 }>;
 
@@ -42,14 +46,19 @@ export class NightActionService {
   ) {}
 
   public async openNightPanel(input: NightPanelInput): Promise<void> {
+    this.logger.debug(
+      { gameId: input.gameId, phaseVersion: input.phaseVersion, chatId: input.chatId, userId: input.userId, hasCallbackQuery: input.callbackQueryId !== undefined },
+      '[NightActionService.openNightPanel] Opening night panel',
+    );
     const { game, player } = await this.getNightPlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
     if (player.role === null || player.role === 'CIVILIAN') {
       await this.ephemeralAdapter.sendText({
         chatId: input.chatId,
         receiverUserId: input.userId,
-        callbackQueryId: input.callbackQueryId,
+        ...(input.callbackQueryId === undefined ? {} : { callbackQueryId: input.callbackQueryId }),
         text: renderNoNightAction(),
       });
+      this.logger.debug({ gameId: game.id, phase: game.phase }, '[NightActionService.openNightPanel] Night panel opened');
       return;
     }
 
@@ -67,14 +76,14 @@ export class NightActionService {
     await this.ephemeralAdapter.sendText({
       chatId: input.chatId,
       receiverUserId: input.userId,
-      callbackQueryId: input.callbackQueryId,
+      ...(input.callbackQueryId === undefined ? {} : { callbackQueryId: input.callbackQueryId }),
       text: panel.text,
       replyMarkup: panel.replyMarkup,
     });
     this.logger.debug({ gameId: game.id, phase: game.phase, candidateCount: candidates.length }, '[NightActionService.openNightPanel] Night panel opened');
   }
 
-  public async submitTarget(input: NightPanelInput & Readonly<{ targetIndex: number }>): Promise<void> {
+  public async submitTarget(input: NightCallbackInput & Readonly<{ targetIndex: number }>): Promise<void> {
     const { game, player } = await this.getNightPlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
     if (player.role === null || player.role === 'CIVILIAN') {
       throw new NightActionError('У вашей роли нет ночного действия.');
@@ -131,7 +140,7 @@ export class NightActionService {
     );
   }
 
-  public async confirmMafiaTarget(input: NightPanelInput): Promise<void> {
+  public async confirmMafiaTarget(input: NightCallbackInput): Promise<void> {
     const { game, player } = await this.getNightPlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
     if (player.role !== 'MAFIA') {
       throw new NightActionError('Подтверждать общий выбор могут только мафии.');
@@ -185,7 +194,7 @@ export class NightActionService {
     await this.ephemeralAdapter.sendText({
       chatId: input.chatId,
       receiverUserId: input.userId,
-      callbackQueryId: input.callbackQueryId,
+      ...(input.callbackQueryId === undefined ? {} : { callbackQueryId: input.callbackQueryId }),
       text: panel.text,
       replyMarkup: panel.replyMarkup,
     });

@@ -70,6 +70,34 @@ describe('NightActionService commissioner checks', () => {
   });
 });
 
+describe('NightActionService panel restoration', () => {
+  it('opens a current night panel without a callback query ID', async () => {
+    const game = { id: 'game-1', chatId: '-1001', phase: 'NIGHT', stateVersion: 7 } as Game;
+    const civilian = { id: 'civilian-player', userId: 'user-1', role: 'CIVILIAN', status: 'ALIVE' } as Player;
+    const sendText = vi.fn().mockResolvedValue({ ephemeral_message_id: 1 });
+    const service = new NightActionService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      { findByGameAndUserId: vi.fn().mockResolvedValue(civilian) } as unknown as PlayerRepository,
+      {} as NightActionRepository,
+      { sendText } as unknown as TelegramEphemeralAdapter,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await service.openNightPanel({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      chatId: game.chatId,
+      userId: civilian.userId,
+    });
+
+    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: game.chatId,
+      receiverUserId: civilian.userId,
+    }));
+    expect(sendText.mock.calls[0]?.[0]).not.toHaveProperty('callbackQueryId');
+  });
+});
+
 describe('NightActionService mafia council', () => {
   it('shows mafia drafts in a private council and requires a confirmation', async () => {
     const game = { id: 'game-1', chatId: '-1001', phase: 'NIGHT', stateVersion: 7 } as Game;

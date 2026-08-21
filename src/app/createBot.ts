@@ -8,6 +8,7 @@ import type { PhaseService } from '../application/PhaseService.js';
 import type { VotingService } from '../application/VotingService.js';
 import type { GameFinalizationService } from '../application/GameFinalizationService.js';
 import type { LobbyService } from '../application/LobbyService.js';
+import type { TelegramEphemeralAdapter } from '../bot/telegram/ephemeral.js';
 import type { AppConfig } from '../config/env.js';
 import type { AppLogger } from '../observability/logger.js';
 import { registerLobbyHandlers } from '../bot/commands/lobbyCommands.js';
@@ -25,6 +26,7 @@ type BotDependencies = Readonly<{
   phaseService: PhaseService;
   votingService: VotingService;
   gameFinalizationService: GameFinalizationService;
+  ephemeralAdapter: TelegramEphemeralAdapter;
 }>;
 
 export function createBot(config: AppConfig, logger: AppLogger, dependencies: BotDependencies): Bot<Context> {
@@ -40,7 +42,7 @@ export function createBot(config: AppConfig, logger: AppLogger, dependencies: Bo
 
   bot.command('help', async (context) => {
     logger.info({ chatId: String(context.chat.id), userId: String(context.from?.id) }, '[createBot.help] Received /help command');
-    await context.reply('🎲 Команды: /mafia, /startgame, /startvote, /mafia_status, /extendroles и /cancelgame. Тайные роли и действия откроются в скрытой панели прямо в группе.');
+    await context.reply('🎲 Команды: /mafia, /startgame, /startvote, /mafia_status, /roles_pending, /restore_panel, /extendroles и /cancelgame. Тайные роли и действия откроются в скрытой панели прямо в группе.');
   });
 
   registerLobbyHandlers(bot, {
