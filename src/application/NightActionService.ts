@@ -154,8 +154,10 @@ export class NightActionService {
       throw new NightActionError('Сначала выберите цель или обновите совет мафии.');
     }
 
-    await this.sendMafiaCouncilPanel(input, game, player);
-    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion }, '[FIX:mafia-council] Mafia draft confirmed');
+    this.logger.info(
+      { gameId: game.id, phaseVersion: game.stateVersion },
+      '[FIX:mafia-confirmation] Mafia draft confirmed without reopening council',
+    );
   }
 
   private async sendMafiaCouncilPanel(input: NightPanelInput, game: Game, player: Player): Promise<void> {

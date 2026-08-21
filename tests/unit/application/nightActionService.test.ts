@@ -99,7 +99,7 @@ describe('NightActionService panel restoration', () => {
 });
 
 describe('NightActionService mafia council', () => {
-  it('shows mafia drafts in a private council and requires a confirmation', async () => {
+  it('shows mafia drafts in a private council and closes it after confirmation', async () => {
     const game = { id: 'game-1', chatId: '-1001', phase: 'NIGHT', stateVersion: 7 } as Game;
     const mafiaOne = { id: 'mafia-1', userId: 'user-1', displayName: 'Мафия 1', role: 'MAFIA', status: 'ALIVE' } as Player;
     const mafiaTwo = { id: 'mafia-2', userId: 'user-2', displayName: 'Мафия 2', role: 'MAFIA', status: 'ALIVE' } as Player;
@@ -159,6 +159,6 @@ describe('NightActionService mafia council', () => {
       phaseVersion: game.stateVersion,
       actorPlayerId: mafiaOne.id,
     });
-    expect(sendText).toHaveBeenCalledTimes(2);
+    expect(sendText).toHaveBeenCalledTimes(1);
   });
 });
