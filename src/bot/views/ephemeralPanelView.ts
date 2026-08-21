@@ -4,17 +4,10 @@ import { encodeGameCallback } from '../callbacks/callbackData.js';
 import { encodeNightTargetCallback } from '../callbacks/callbackData.js';
 import type { Role } from '../../domain/game/types.js';
 
-export function renderRolePanel(input: Readonly<{ gameId: string; phaseVersion: number; role: Role }>): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
+export function renderRolePanel(input: Readonly<{ role: Role }>): Readonly<{ text: string }> {
   return {
-    text: roleDescription(input.role),
-    replyMarkup: {
-      inline_keyboard: [[{ text: '✅ Роль получена', callback_data: encodeGameCallback(input.gameId, input.phaseVersion, 'confirm') }]],
-    },
+    text: `${roleDescription(input.role)}\n\n✅ Получение роли засчитано автоматически.`,
   };
-}
-
-export function renderRoleConfirmation(): string {
-  return '✅ Роль подтверждена. Дождитесь, пока остальные игроки откроют свои панели.';
 }
 
 export function renderNightPanel(input: Readonly<{

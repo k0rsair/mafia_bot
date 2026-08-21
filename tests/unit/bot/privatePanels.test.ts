@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CallbackGuardError, CallbackGuardService } from '../../../src/application/CallbackGuardService.js';
 import { encodeGameCallback, encodeNightTargetCallback, encodeVoteCallback, parseGameCallback, parseVoteCallback } from '../../../src/bot/callbacks/callbackData.js';
 import { TelegramEphemeralAdapter } from '../../../src/bot/telegram/ephemeral.js';
-import { renderNightPanel } from '../../../src/bot/views/ephemeralPanelView.js';
+import { renderNightPanel, renderRolePanel } from '../../../src/bot/views/ephemeralPanelView.js';
 import { renderRoleControl } from '../../../src/bot/views/phaseView.js';
 import { createLogger } from '../../../src/observability/logger.js';
 
@@ -54,6 +54,14 @@ describe('group-only private panels', () => {
       phaseVersion: 2,
       action: 'mafia-confirm',
     });
+  });
+
+  it('does not render a second confirmation control after showing a role', () => {
+    const panel = renderRolePanel({ role: 'CIVILIAN' });
+
+    expect(panel.text).toContain('Получение роли засчитано автоматически');
+    expect(panel).not.toHaveProperty('replyMarkup');
+    expect(JSON.stringify(panel)).not.toContain('confirm');
   });
 
   it('preserves the original alive-player index when a role filters its target list', () => {

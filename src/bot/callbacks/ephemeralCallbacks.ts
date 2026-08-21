@@ -1,6 +1,6 @@
 import type { Bot, Context } from 'grammy';
 
-import { EphemeralPanelError, type EphemeralPanelService } from '../../application/EphemeralPanelService.js';
+import { EphemeralPanelError, type EphemeralPanelService, type RoleConfirmationResult } from '../../application/EphemeralPanelService.js';
 import { NightActionError, type NightActionService } from '../../application/NightActionService.js';
 import type { PhaseDeadlineResult, PhaseService } from '../../application/PhaseService.js';
 import type { TestGameService } from '../../application/TestGameService.js';
@@ -36,8 +36,9 @@ export function registerEphemeralCallbacks(
 
     try {
       if (callback.action === 'panel') {
-        await panelService.openPanel(input);
+        const result = await panelService.openPanel(input);
         await context.answerCallbackQuery();
+        await publishRoleConfirmationCompletion(context, result, panelService, testGameService);
         return;
       }
 
@@ -62,16 +63,7 @@ export function registerEphemeralCallbacks(
 
       const result = await panelService.confirmRole(input);
       await context.answerCallbackQuery({ text: '✅ Роль подтверждена.' });
-      if (result.nightStarted && result.nightGame !== undefined) {
-        const testCompletion = await testGameService.playVirtualNightActions(result.nightGame);
-        if (testCompletion !== null) {
-          await publishNightCompletion(context, testCompletion);
-          return;
-        }
-        const view = renderNightControl(result.nightGame.id, result.nightGame.stateVersion);
-        const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
-        await panelService.recordControlMessage(result.nightGame.id, controlMessage.message_id);
-      }
+      await publishRoleConfirmationCompletion(context, result, panelService, testGameService);
     } catch (error) {
       logger.warn({ gameId: callback.gameId, userId: input.userId, error }, '[registerEphemeralCallbacks] Rejected ephemeral callback');
       const text = error instanceof EphemeralPanelError || error instanceof NightActionError
@@ -80,6 +72,26 @@ export function registerEphemeralCallbacks(
       await context.answerCallbackQuery({ text: `⚠️ ${text}`, show_alert: true });
     }
   });
+}
+
+async function publishRoleConfirmationCompletion(
+  context: Context,
+  result: RoleConfirmationResult,
+  panelService: EphemeralPanelService,
+  testGameService: TestGameService,
+): Promise<void> {
+  if (!result.nightStarted || result.nightGame === undefined) {
+    return;
+  }
+
+  const testCompletion = await testGameService.playVirtualNightActions(result.nightGame);
+  if (testCompletion !== null) {
+    await publishNightCompletion(context, testCompletion);
+    return;
+  }
+  const view = renderNightControl(result.nightGame.id, result.nightGame.stateVersion);
+  const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
+  await panelService.recordControlMessage(result.nightGame.id, controlMessage.message_id);
 }
 
 export async function publishNightCompletion(

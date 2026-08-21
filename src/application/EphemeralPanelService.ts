@@ -1,6 +1,6 @@
 import type { Game, Player } from '@prisma/client';
 
-import { renderRoleConfirmation, renderRolePanel } from '../bot/views/ephemeralPanelView.js';
+import { renderRolePanel } from '../bot/views/ephemeralPanelView.js';
 import type { AppLogger } from '../observability/logger.js';
 import type { TelegramEphemeralAdapter } from '../bot/telegram/ephemeral.js';
 import type { GameRepository } from '../infrastructure/repositories/GameRepository.js';
@@ -28,6 +28,11 @@ type PanelCallbackInput = PanelInput & Readonly<{
   callbackQueryId: string;
 }>;
 
+export type RoleConfirmationResult = Readonly<{
+  nightStarted: boolean;
+  nightGame?: Game;
+}>;
+
 export class EphemeralPanelService {
   public constructor(
     private readonly gameRepository: GameRepository,
@@ -39,14 +44,14 @@ export class EphemeralPanelService {
     private readonly callbackGuard: CallbackGuardService = new CallbackGuardService(),
   ) {}
 
-  public async openPanel(input: PanelCallbackInput): Promise<void> {
+  public async openPanel(input: PanelCallbackInput): Promise<RoleConfirmationResult> {
     const game = await this.gameRepository.findById(input.gameId);
     if (game?.phase === 'NIGHT' && game.stateVersion === input.phaseVersion) {
       await this.nightActionService.openNightPanel(input);
-      return;
+      return { nightStarted: false };
     }
 
-    await this.openRolePanel(input);
+    return this.openRolePanel(input, true);
   }
 
   public async restorePanel(input: Readonly<{ gameId: string; chatId: string; userId: string }>): Promise<void> {
@@ -68,47 +73,58 @@ export class EphemeralPanelService {
       throw new EphemeralPanelError('Личную панель можно восстановить только во время подтверждения ролей или ночью.');
     }
 
-    await this.openRolePanel(panelInput);
+    await this.openRolePanel(panelInput, false);
     this.logger.info({ gameId: game.id, phase: game.phase }, '[EphemeralPanelService.restorePanel] Personal panel restored');
   }
 
-  private async openRolePanel(input: PanelInput): Promise<void> {
+  private async openRolePanel(input: PanelInput, confirmOnDelivery: boolean): Promise<RoleConfirmationResult> {
     const { game, player } = await this.getRoleConfirmationPlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
     if (player.role === null) {
       throw new EphemeralPanelError('Роль ещё не назначена. Попробуйте позже.');
     }
 
-    const panel = renderRolePanel({ gameId: game.id, phaseVersion: game.stateVersion, role: player.role });
+    const panel = renderRolePanel({ role: player.role });
     await this.ephemeralAdapter.sendText({
       chatId: input.chatId,
       receiverUserId: input.userId,
       ...(input.callbackQueryId === undefined ? {} : { callbackQueryId: input.callbackQueryId }),
       text: panel.text,
-      replyMarkup: panel.replyMarkup,
     });
-    this.logger.debug({ gameId: game.id, phase: game.phase }, '[EphemeralPanelService.openRolePanel] Role panel opened');
+    this.logger.debug(
+      { gameId: game.id, phase: game.phase, stateVersion: game.stateVersion, confirmedOnDelivery: confirmOnDelivery },
+      '[EphemeralPanelService.openRolePanel] Role panel delivered',
+    );
+
+    if (!confirmOnDelivery) {
+      return { nightStarted: false };
+    }
+
+    return this.recordRoleConfirmation(game, player);
   }
 
-  public async confirmRole(input: PanelCallbackInput): Promise<Readonly<{ nightStarted: boolean; nightGame?: Game }>> {
+  public async confirmRole(input: PanelCallbackInput): Promise<RoleConfirmationResult> {
     const { game, player } = await this.getRoleConfirmationPlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
+    return this.recordRoleConfirmation(game, player);
+  }
+
+  private async recordRoleConfirmation(game: Game, player: Player): Promise<RoleConfirmationResult> {
     const confirmed = await this.playerRepository.confirmRole(game.id, player.userId);
     const confirmedCount = await this.playerRepository.countRoleConfirmations(game.id);
     const alivePlayers = await this.playerRepository.listAlivePlayers(game.id);
 
-    await this.ephemeralAdapter.sendText({
-      chatId: input.chatId,
-      receiverUserId: input.userId,
-      callbackQueryId: input.callbackQueryId,
-      text: renderRoleConfirmation(),
-    });
-
     if (confirmedCount !== alivePlayers.length) {
-      this.logger.info({ gameId: game.id, confirmedCount, playerCount: alivePlayers.length, confirmed }, '[EphemeralPanelService.confirmRole] Waiting for role confirmations');
+      this.logger.info(
+        { gameId: game.id, phase: game.phase, stateVersion: game.stateVersion, confirmedCount, playerCount: alivePlayers.length, confirmed },
+        '[FIX:auto-role-confirmation] Waiting for role confirmations',
+      );
       return { nightStarted: false };
     }
 
     const night = await this.phaseService.startNight(game);
-    this.logger.info({ gameId: game.id, nightStarted: night !== null }, '[EphemeralPanelService.confirmRole] All roles confirmed');
+    this.logger.info(
+      { gameId: game.id, phase: game.phase, stateVersion: game.stateVersion, confirmedCount, playerCount: alivePlayers.length, confirmed, nightStarted: night !== null },
+      '[FIX:auto-role-confirmation] All role deliveries confirmed',
+    );
     return night === null ? { nightStarted: false } : { nightStarted: true, nightGame: night };
   }
 
