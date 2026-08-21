@@ -116,6 +116,7 @@ describe('NightActionService mafia council', () => {
     const upsertMafiaDraft = vi.fn().mockResolvedValue({});
     const confirmMafiaDraft = vi.fn().mockResolvedValue(true);
     const sendText = vi.fn().mockResolvedValue({ ephemeral_message_id: 1 });
+    const editText = vi.fn().mockResolvedValue(undefined);
     const service = new NightActionService(
       { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
       {
@@ -129,7 +130,7 @@ describe('NightActionService mafia council', () => {
           .mockResolvedValueOnce([teammateDraft, ownDraft])
           .mockResolvedValueOnce([teammateDraft, ownConfirmedDraft]),
       } as unknown as NightActionRepository,
-      { sendText } as unknown as TelegramEphemeralAdapter,
+      { sendText, editText } as unknown as TelegramEphemeralAdapter,
       createLogger({ logLevel: 'silent' }),
     );
     const input = { gameId: game.id, phaseVersion: game.stateVersion, chatId: game.chatId, userId: mafiaOne.userId, callbackQueryId: 'query-1' };
@@ -151,6 +152,17 @@ describe('NightActionService mafia council', () => {
         ]),
       }),
     }));
+
+    await service.submitTarget({ ...input, ephemeralMessageId: 42, targetIndex: 2 });
+
+    expect(editText).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: game.chatId,
+      receiverUserId: mafiaOne.userId,
+      ephemeralMessageId: 42,
+      text: expect.stringContaining('Совет мафии'),
+      replyMarkup: expect.any(Object),
+    }));
+    expect(sendText).toHaveBeenCalledTimes(1);
 
     await service.confirmMafiaTarget(input);
 

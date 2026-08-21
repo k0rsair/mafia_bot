@@ -32,6 +32,9 @@ export function registerEphemeralCallbacks(
       chatId: String(context.chat.id),
       userId: String(context.from.id),
       callbackQueryId: context.callbackQuery.id,
+      ...(context.callbackQuery.message?.ephemeral_message_id === undefined
+        ? {}
+        : { ephemeralMessageId: context.callbackQuery.message.ephemeral_message_id }),
     };
 
     try {

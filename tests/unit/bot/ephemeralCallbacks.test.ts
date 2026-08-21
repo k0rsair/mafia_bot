@@ -3,7 +3,7 @@ import type { Bot, Context } from 'grammy';
 import { describe, expect, it, vi } from 'vitest';
 
 import { registerEphemeralCallbacks } from '../../../src/bot/callbacks/ephemeralCallbacks.js';
-import { encodeGameCallback } from '../../../src/bot/callbacks/callbackData.js';
+import { encodeGameCallback, encodeNightTargetCallback } from '../../../src/bot/callbacks/callbackData.js';
 import { createLogger } from '../../../src/observability/logger.js';
 
 type CallbackHandler = (context: Context) => Promise<unknown>;
@@ -58,5 +58,53 @@ describe('ephemeral role-panel callbacks', () => {
       expect.objectContaining({ reply_markup: expect.any(Object) }),
     );
     expect(recordControlMessage).toHaveBeenCalledWith(nightGame.id, 42);
+  });
+
+  it('forwards the ephemeral message ID when mafia chooses a target', async () => {
+    const handlers: CallbackHandler[] = [];
+    const submitTarget = vi.fn().mockResolvedValue(undefined);
+    const completeNightIfAllActionsCompleted = vi.fn().mockResolvedValue(null);
+    const bot = {
+      callbackQuery: vi.fn((_query: RegExp, handler: CallbackHandler) => handlers.push(handler)),
+    } as unknown as Bot<Context>;
+    const answerCallbackQuery = vi.fn().mockResolvedValue(true);
+
+    registerEphemeralCallbacks(
+      bot,
+      {} as never,
+      { submitTarget } as never,
+      { completeNightIfAllActionsCompleted } as never,
+      {} as never,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    const handler = handlers[0];
+    if (handler === undefined) {
+      throw new Error('Game callback handler was not registered');
+    }
+    const context = {
+      callbackQuery: {
+        data: encodeNightTargetCallback('game-1', 7, 2),
+        id: 'query-1',
+        message: { ephemeral_message_id: 99 },
+      },
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 101 },
+      answerCallbackQuery,
+    } as unknown as Context;
+
+    await handler(context);
+
+    expect(submitTarget).toHaveBeenCalledWith({
+      gameId: 'game-1',
+      phaseVersion: 7,
+      chatId: '-1001',
+      userId: '101',
+      callbackQueryId: 'query-1',
+      ephemeralMessageId: 99,
+      targetIndex: 2,
+    });
+    expect(completeNightIfAllActionsCompleted).toHaveBeenCalledWith('game-1', 7);
+    expect(answerCallbackQuery).toHaveBeenCalledWith({ text: '✅ Выбор принят.' });
   });
 });

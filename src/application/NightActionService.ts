@@ -29,6 +29,7 @@ type NightPanelInput = Readonly<{
   chatId: string;
   userId: string;
   callbackQueryId?: string;
+  ephemeralMessageId?: number;
 }>;
 
 type NightCallbackInput = NightPanelInput & Readonly<{
@@ -47,7 +48,7 @@ export class NightActionService {
 
   public async openNightPanel(input: NightPanelInput): Promise<void> {
     this.logger.debug(
-      { gameId: input.gameId, phaseVersion: input.phaseVersion, chatId: input.chatId, userId: input.userId, hasCallbackQuery: input.callbackQueryId !== undefined },
+      { gameId: input.gameId, phaseVersion: input.phaseVersion, chatId: input.chatId, userId: input.userId, hasCallbackQuery: input.callbackQueryId !== undefined, hasEphemeralMessageId: input.ephemeralMessageId !== undefined },
       '[NightActionService.openNightPanel] Opening night panel',
     );
     const { game, player } = await this.getNightPlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
@@ -193,16 +194,26 @@ export class NightActionService {
       hasOwnDraft: ownSelection !== undefined,
       ownDraftConfirmed: ownSelection?.confirmed ?? false,
     });
-    await this.ephemeralAdapter.sendText({
-      chatId: input.chatId,
-      receiverUserId: input.userId,
-      ...(input.callbackQueryId === undefined ? {} : { callbackQueryId: input.callbackQueryId }),
-      text: panel.text,
-      replyMarkup: panel.replyMarkup,
-    });
+    if (input.ephemeralMessageId !== undefined) {
+      await this.ephemeralAdapter.editText({
+        chatId: input.chatId,
+        receiverUserId: input.userId,
+        ephemeralMessageId: input.ephemeralMessageId,
+        text: panel.text,
+        replyMarkup: panel.replyMarkup,
+      });
+    } else {
+      await this.ephemeralAdapter.sendText({
+        chatId: input.chatId,
+        receiverUserId: input.userId,
+        ...(input.callbackQueryId === undefined ? {} : { callbackQueryId: input.callbackQueryId }),
+        text: panel.text,
+        replyMarkup: panel.replyMarkup,
+      });
+    }
     this.logger.debug(
-      { gameId: game.id, phase: game.phase, candidateCount: candidates.length, mafiaDraftCount: selections.length, confirmedMafiaDraftCount: selections.filter((selection) => selection.confirmed).length },
-      '[FIX:mafia-council] Mafia council panel opened',
+      { gameId: game.id, phase: game.phase, candidateCount: candidates.length, mafiaDraftCount: selections.length, confirmedMafiaDraftCount: selections.filter((selection) => selection.confirmed).length, updatedExistingPanel: input.ephemeralMessageId !== undefined },
+      '[FIX:mafia-council] Mafia council panel rendered',
     );
   }
 
