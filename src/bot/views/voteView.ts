@@ -1,5 +1,6 @@
 import type { InlineKeyboardMarkup } from 'grammy/types';
 
+import type { PublicVoteDetail } from '../../domain/game/voteDetails.js';
 import { encodeVoteCallback } from '../callbacks/callbackData.js';
 
 export function renderVoteView(input: Readonly<{
@@ -8,6 +9,7 @@ export function renderVoteView(input: Readonly<{
   candidates: readonly Readonly<{ id: string; displayName: string }>[];
   votesCast: number;
   votersTotal: number;
+  voteDetails: readonly PublicVoteDetail[];
 }>): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
   const choices = input.candidates.map((candidate, targetIndex) =>
     ({
@@ -17,7 +19,13 @@ export function renderVoteView(input: Readonly<{
   );
 
   return {
-    text: ['🗳️ Дневное голосование', '', 'Выберите игрока или пропустите голосование.', `Голоса: ${input.votesCast}/${input.votersTotal}`].join('\n'),
+    text: [
+      '🗳️ Дневное голосование',
+      '',
+      'Выберите игрока или пропустите голосование.',
+      `Голоса: ${input.votesCast}/${input.votersTotal}`,
+      ...renderVoteDetails(input.voteDetails),
+    ].join('\n'),
     replyMarkup: {
       inline_keyboard: [...chunk(choices, 2), [{ text: '🤝 Пропустить', callback_data: encodeVoteCallback(input.gameId, input.phaseVersion, null) }]],
     },
@@ -37,8 +45,27 @@ export function renderVoteOutcome(input: Readonly<{ outcome: 'ELIMINATION' | 'SK
   return '🤝 Голосов не было. Сегодня никто не выбывает.';
 }
 
-export function renderClosedVoteView(input: Readonly<{ outcome: 'ELIMINATION' | 'SKIP' | 'TIE' | 'NO_VOTES'; eliminatedDisplayName?: string }>): string {
-  return ['🗳️ Дневное голосование завершено.', '', 'Результат:', renderVoteOutcome(input)].join('\n');
+export function renderClosedVoteView(input: Readonly<{
+  outcome: 'ELIMINATION' | 'SKIP' | 'TIE' | 'NO_VOTES';
+  eliminatedDisplayName?: string;
+  voteDetails?: readonly PublicVoteDetail[];
+}>): string {
+  return [
+    '🗳️ Дневное голосование завершено.',
+    ...renderVoteDetails(input.voteDetails ?? []),
+    '',
+    'Результат:',
+    renderVoteOutcome(input),
+  ].join('\n');
+}
+
+function renderVoteDetails(voteDetails: readonly PublicVoteDetail[]): string[] {
+  if (voteDetails.length === 0) {
+    return [];
+  }
+  return ['', 'Кто за кого:', ...voteDetails.map((vote) =>
+    `• ${vote.voterDisplayName} → ${vote.targetDisplayName ?? 'пропуск'}`,
+  )];
 }
 
 function chunk<T>(items: readonly T[], size: number): T[][] {

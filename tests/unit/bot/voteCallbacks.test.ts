@@ -20,6 +20,10 @@ describe('day vote callbacks', () => {
       resolution: {
         resolution: { outcome: 'ELIMINATION', eliminatedPlayerId: 'player-2' },
         eliminatedPlayer: { id: 'player-2', displayName: 'Игрок 2' },
+        voteDetails: [
+          { voterDisplayName: 'Игрок 1', targetDisplayName: 'Игрок 2' },
+          { voterDisplayName: 'Игрок 3', targetDisplayName: null },
+        ],
       },
     });
     const recordControlMessage = vi.fn().mockResolvedValue(undefined);
@@ -61,6 +65,10 @@ describe('day vote callbacks', () => {
     );
     expect(editMessageText).toHaveBeenCalledWith(
       expect.stringContaining('Игрок 2'),
+      { reply_markup: { inline_keyboard: [] } },
+    );
+    expect(editMessageText).toHaveBeenCalledWith(
+      expect.stringContaining('Игрок 3 → пропуск'),
       { reply_markup: { inline_keyboard: [] } },
     );
     expect(answerCallbackQuery).toHaveBeenCalledWith({ text: '✅ Голос принят.' });

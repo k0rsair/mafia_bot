@@ -1,5 +1,6 @@
 import type { Game, Player } from '@prisma/client';
 
+import { toPublicVoteDetails, type PublicVoteDetail } from '../domain/game/voteDetails.js';
 import { resolveVote, type VoteResolution } from '../domain/game/voteResolution.js';
 import type { AppLogger } from '../observability/logger.js';
 import type { GameRepository } from '../infrastructure/repositories/GameRepository.js';
@@ -24,6 +25,7 @@ export type VoteProgress = Readonly<{
 export type AppliedVoteResolution = Readonly<{
   resolution: VoteResolution;
   eliminatedPlayer: Player | null;
+  voteDetails: readonly PublicVoteDetail[];
 }>;
 
 export class VotingService {
@@ -59,18 +61,21 @@ export class VotingService {
 
   public async resolveVote(gameId: string, phaseVersion: number): Promise<AppliedVoteResolution> {
     this.logger.debug({ gameId, phaseVersion }, '[VotingService.resolveVote] Resolving day vote');
-    const votes = await this.voteRepository.listVotes(gameId, phaseVersion);
+    const [votes, alivePlayers] = await Promise.all([
+      this.voteRepository.listVotes(gameId, phaseVersion),
+      this.playerRepository.listAlivePlayers(gameId),
+    ]);
     const resolution = resolveVote(votes);
     const eliminatedPlayer = resolution.eliminatedPlayerId === null
       ? null
-      : (await this.playerRepository.listAlivePlayers(gameId)).find((player) => player.id === resolution.eliminatedPlayerId) ?? null;
+      : alivePlayers.find((player) => player.id === resolution.eliminatedPlayerId) ?? null;
 
     if (eliminatedPlayer !== null) {
       await this.playerRepository.eliminatePlayer(gameId, eliminatedPlayer.id);
     }
 
     this.logger.info({ gameId, phaseVersion, voteCount: votes.length, outcome: resolution.outcome }, '[VotingService.resolveVote] Vote resolved');
-    return { resolution, eliminatedPlayer };
+    return { resolution, eliminatedPlayer, voteDetails: toPublicVoteDetails(votes, alivePlayers) };
   }
 
   private async getVotePlayer(gameId: string, phaseVersion: number, chatId: string, userId: string): Promise<Readonly<{ game: Game; voter: Player }>> {

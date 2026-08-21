@@ -202,8 +202,8 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
     }
 
     dependencies.logger.info({ gameId: voteGame.id, chatId: voteGame.chatId }, '[FIX:manual-vote-start] Organizer started day vote');
-    const virtualProgress = await dependencies.testGameService.castVirtualVotes(voteGame);
-    const view = await dependencies.dayService.renderVote(voteGame, virtualProgress ?? undefined);
+    await dependencies.testGameService.castVirtualVotes(voteGame);
+    const view = await dependencies.dayService.renderVote(voteGame);
     const controlMessage = await context.reply(`🗳️ Организатор завершил обсуждение. Голосование начинается!\n\n${view.text}`, { reply_markup: view.replyMarkup });
     await dependencies.phaseService.recordControlMessage(voteGame.id, controlMessage.message_id);
   });

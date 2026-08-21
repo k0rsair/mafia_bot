@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   const nightResolutionService = new NightResolutionService(playerRepository, nightActionRepository, logger);
   const votingService = new VotingService(gameRepository, playerRepository, voteRepository, logger);
   const gameFinalizationService = new GameFinalizationService(gameRepository, playerRepository, logger);
-  const dayService = new DayService(playerRepository, logger);
+  const dayService = new DayService(playerRepository, voteRepository, logger);
   const phaseService = new PhaseService(gameRepository, nightResolutionService, votingService, gameFinalizationService, config, logger);
   const testGameService = new TestGameService(lobbyService, gameService, playerRepository, nightActionRepository, votingService, phaseService, logger);
   const ephemeralAdapter = new TelegramEphemeralAdapter(config.botToken, logger);
@@ -71,6 +71,7 @@ async function main(): Promise<void> {
       await bot.api.editMessageText(game.chatId, game.controlMessageId, renderClosedVoteView({
         outcome: resolution.resolution.outcome,
         ...(resolution.eliminatedPlayer === null ? {} : { eliminatedDisplayName: resolution.eliminatedPlayer.displayName }),
+        voteDetails: resolution.voteDetails,
       }), { reply_markup: { inline_keyboard: [] } });
     } catch {
       logger.warn({ gameId: game.id }, '[FIX:vote-closure] Could not close vote control message');
@@ -88,8 +89,8 @@ async function main(): Promise<void> {
       await bot.api.sendMessage(result.game.chatId, renderDayDiscussion());
     }
     if (result.kind === 'DAY_VOTE_STARTED') {
-      const virtualProgress = await testGameService.castVirtualVotes(result.game);
-      const view = await dayService.renderVote(result.game, virtualProgress ?? undefined);
+      await testGameService.castVirtualVotes(result.game);
+      const view = await dayService.renderVote(result.game);
       const controlMessage = await bot.api.sendMessage(result.game.chatId, view.text, { reply_markup: view.replyMarkup });
       await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
     }
@@ -152,8 +153,8 @@ async function main(): Promise<void> {
           await gameRepository.setControlMessageId(game.id, message.message_id);
         }
       } else if (game.phase === 'DAY_VOTE') {
-        const virtualProgress = await testGameService.castVirtualVotes(game);
-        const view = await dayService.renderVote(game, virtualProgress ?? undefined);
+        await testGameService.castVirtualVotes(game);
+        const view = await dayService.renderVote(game);
         const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
         await gameRepository.setControlMessageId(game.id, message.message_id);
       } else if (game.phase === 'DAY_DISCUSSION') {

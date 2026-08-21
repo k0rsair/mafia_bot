@@ -35,7 +35,7 @@ export function registerVoteCallbacks(
         userId: String(context.from.id),
         targetIndex: callback.action === 'skip' ? null : callback.targetIndex ?? null,
       });
-      const view = await dayService.renderVote(progress.game, progress);
+      const view = await dayService.renderVote(progress.game);
       if (!progress.allVoted) {
         await context.editMessageText(view.text, { reply_markup: view.replyMarkup });
         await context.answerCallbackQuery({ text: '✅ Голос принят.' });
@@ -87,5 +87,6 @@ async function closeVoteMessage(context: Context, resolution: AppliedVoteResolut
   await context.editMessageText(renderClosedVoteView({
     outcome: resolution.resolution.outcome,
     ...(resolution.eliminatedPlayer === null ? {} : { eliminatedDisplayName: resolution.eliminatedPlayer.displayName }),
+    voteDetails: resolution.voteDetails,
   }), { reply_markup: { inline_keyboard: [] } });
 }
