@@ -21,6 +21,7 @@ import { VoteRepository } from './infrastructure/repositories/VoteRepository.js'
 import { createLogger } from './observability/logger.js';
 import { TelegramEphemeralAdapter } from './bot/telegram/ephemeral.js';
 import { renderDayDiscussion } from './bot/views/dayView.js';
+import { renderNightEvent } from './bot/views/nightEventView.js';
 import { renderNightControl, renderRoleControl } from './bot/views/phaseView.js';
 import { renderClosedVoteView } from './bot/views/voteView.js';
 import { renderFinalView } from './bot/views/finalView.js';
@@ -82,9 +83,12 @@ async function main(): Promise<void> {
       await bot.api.sendMessage(result.game.chatId, '⌛ Время подтверждения ролей истекло. Организатор может отменить игру или попросить игроков открыть панель снова.');
     }
     if (result.kind === 'NIGHT_RESOLVED') {
-      const text = result.resolution.eliminatedPlayer === null
-        ? '☀️ Рассвет. Этой ночью город никого не потерял.'
-        : `☀️ Рассвет. Ночью выбыл игрок: ${result.resolution.eliminatedPlayer.displayName}.`;
+      const text = renderNightEvent({
+        gameId: result.game.id,
+        phaseVersion: result.game.stateVersion,
+        eliminatedDisplayName: result.resolution.eliminatedPlayer?.displayName ?? null,
+        savedDisplayName: result.resolution.savedPlayer?.displayName ?? null,
+      });
       await bot.api.sendMessage(result.game.chatId, text);
       await bot.api.sendMessage(result.game.chatId, renderDayDiscussion());
     }
@@ -110,9 +114,12 @@ async function main(): Promise<void> {
         await closeVoteControlMessage(result.game, result.voteResolution);
       }
       if (result.nightResolution !== undefined) {
-        const dawnText = result.nightResolution.eliminatedPlayer === null
-          ? '☀️ Рассвет. Этой ночью город никого не потерял.'
-          : `☀️ Рассвет. Ночью выбыл игрок: ${result.nightResolution.eliminatedPlayer.displayName}.`;
+        const dawnText = renderNightEvent({
+          gameId: result.game.id,
+          phaseVersion: result.game.stateVersion,
+          eliminatedDisplayName: result.nightResolution.eliminatedPlayer?.displayName ?? null,
+          savedDisplayName: result.nightResolution.savedPlayer?.displayName ?? null,
+        });
         await bot.api.sendMessage(result.game.chatId, dawnText);
       }
       await bot.api.sendMessage(result.game.chatId, renderFinalView(result.finalization));
@@ -185,9 +192,12 @@ async function publishVirtualNightCompletion(
   if (resolution === undefined) {
     return;
   }
-  const dawnText = resolution.eliminatedPlayer === null
-    ? '☀️ Рассвет. Этой ночью город никого не потерял.'
-    : `☀️ Рассвет. Ночью выбыл игрок: ${resolution.eliminatedPlayer.displayName}.`;
+  const dawnText = renderNightEvent({
+    gameId: completion.game.id,
+    phaseVersion: completion.game.stateVersion,
+    eliminatedDisplayName: resolution.eliminatedPlayer?.displayName ?? null,
+    savedDisplayName: resolution.savedPlayer?.displayName ?? null,
+  });
   await api.sendMessage(completion.game.chatId, dawnText);
   if (completion.kind === 'GAME_FINISHED') {
     await api.sendMessage(completion.game.chatId, renderFinalView(completion.finalization));

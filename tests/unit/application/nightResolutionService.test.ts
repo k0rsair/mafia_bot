@@ -34,6 +34,30 @@ describe('NightResolutionService', () => {
     expect(eliminatePlayer).toHaveBeenCalledWith('game-1', confirmedTarget.id);
   });
 
+  it('exposes the saved resident when the doctor blocks the mafia target', async () => {
+    const savedTarget = { id: 'saved-target', displayName: 'Житель', status: 'ALIVE' } as Player;
+    const eliminatePlayer = vi.fn();
+    const service = new NightResolutionService(
+      {
+        listAlivePlayers: vi.fn().mockResolvedValue([savedTarget]),
+        eliminatePlayer,
+      } as unknown as PlayerRepository,
+      {
+        listActions: vi.fn().mockResolvedValue([
+          { actionType: 'MAFIA_KILL', actorPlayerId: 'mafia-1', targetPlayerId: savedTarget.id, confirmedAt: new Date() } as NightAction,
+          { actionType: 'DOCTOR_SAVE', actorPlayerId: 'doctor-1', targetPlayerId: savedTarget.id, confirmedAt: null } as NightAction,
+        ]),
+      } as unknown as NightActionRepository,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    const result = await service.resolve('game-1', 7);
+
+    expect(result.eliminatedPlayer).toBeNull();
+    expect(result.savedPlayer).toEqual(savedTarget);
+    expect(eliminatePlayer).not.toHaveBeenCalled();
+  });
+
   it('requires a completed action from every alive night role', async () => {
     const mafia = { id: 'mafia-1', role: 'MAFIA', status: 'ALIVE' } as Player;
     const doctor = { id: 'doctor-1', role: 'DOCTOR', status: 'ALIVE' } as Player;

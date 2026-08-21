@@ -8,6 +8,7 @@ import type { AppLogger } from '../../observability/logger.js';
 import { isGameGroup } from '../authorization/chatPermissions.js';
 import { parseGameCallback } from './callbackData.js';
 import { renderDayDiscussion } from '../views/dayView.js';
+import { renderNightEvent } from '../views/nightEventView.js';
 import { renderFinalView } from '../views/finalView.js';
 import { renderNightControl } from '../views/phaseView.js';
 
@@ -109,9 +110,12 @@ export async function publishNightCompletion(
   if (resolution === undefined) {
     return;
   }
-  const dawnText = resolution.eliminatedPlayer === null
-    ? '☀️ Рассвет. Этой ночью город никого не потерял.'
-    : `☀️ Рассвет. Ночью выбыл игрок: ${resolution.eliminatedPlayer.displayName}.`;
+  const dawnText = renderNightEvent({
+    gameId: completion.game.id,
+    phaseVersion: completion.game.stateVersion,
+    eliminatedDisplayName: resolution.eliminatedPlayer?.displayName ?? null,
+    savedDisplayName: resolution.savedPlayer?.displayName ?? null,
+  });
   await context.reply(dawnText);
   if (completion.kind === 'GAME_FINISHED') {
     await context.reply(renderFinalView(completion.finalization));

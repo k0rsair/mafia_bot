@@ -8,6 +8,7 @@ import type { PlayerRepository } from '../infrastructure/repositories/PlayerRepo
 export type AppliedNightResolution = Readonly<{
   resolution: NightResolution;
   eliminatedPlayer: Player | null;
+  savedPlayer: Player | null;
 }>;
 
 export type NightActionProgress = Readonly<{
@@ -25,12 +26,18 @@ export class NightResolutionService {
 
   public async resolve(gameId: string, phaseVersion: number): Promise<AppliedNightResolution> {
     this.logger.debug({ gameId, phaseVersion }, '[NightResolutionService.resolve] Resolving night');
-    const actions = await this.nightActionRepository.listActions(gameId, phaseVersion);
+    const [actions, alivePlayers] = await Promise.all([
+      this.nightActionRepository.listActions(gameId, phaseVersion),
+      this.playerRepository.listAlivePlayers(gameId),
+    ]);
     const resolvedActions = actions.filter((action) => action.actionType !== 'MAFIA_KILL' || action.confirmedAt !== null);
     const resolution = resolveNight(resolvedActions);
     const eliminatedPlayer = resolution.eliminatedPlayerId === null
       ? null
-      : (await this.playerRepository.listAlivePlayers(gameId)).find((player) => player.id === resolution.eliminatedPlayerId) ?? null;
+      : alivePlayers.find((player) => player.id === resolution.eliminatedPlayerId) ?? null;
+    const savedPlayer = resolution.attackedPlayerId !== null && resolution.attackedPlayerId === resolution.savedPlayerId
+      ? alivePlayers.find((player) => player.id === resolution.savedPlayerId) ?? null
+      : null;
 
     if (eliminatedPlayer !== null) {
       await this.playerRepository.eliminatePlayer(gameId, eliminatedPlayer.id);
@@ -46,7 +53,7 @@ export class NightResolutionService {
       },
       '[NightResolutionService.resolve] Night resolved',
     );
-    return { resolution, eliminatedPlayer };
+    return { resolution, eliminatedPlayer, savedPlayer };
   }
 
   public async getActionProgress(gameId: string, phaseVersion: number): Promise<NightActionProgress> {
