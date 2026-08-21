@@ -70,6 +70,23 @@ export class TelegramEphemeralAdapter {
     });
   }
 
+  public async deleteEphemeralMessage(input: Readonly<{
+    chatId: string;
+    receiverUserId: string;
+    ephemeralMessageId: number;
+  }>): Promise<void> {
+    this.logger.debug(
+      { chatId: input.chatId, receiverUserId: input.receiverUserId },
+      '[TelegramEphemeralAdapter.deleteEphemeralMessage] Deleting ephemeral panel',
+    );
+
+    await this.callApi<boolean>('deleteEphemeralMessage', {
+      chat_id: input.chatId,
+      receiver_user_id: toSafeTelegramId(input.receiverUserId),
+      ephemeral_message_id: input.ephemeralMessageId,
+    });
+  }
+
   private async callApi<T>(method: string, body: Record<string, unknown>): Promise<T> {
     const response = await this.fetchImplementation(`https://api.telegram.org/bot${this.botToken}/${method}`, {
       method: 'POST',

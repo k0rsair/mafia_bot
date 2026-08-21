@@ -99,7 +99,7 @@ describe('NightActionService panel restoration', () => {
 });
 
 describe('NightActionService mafia council', () => {
-  it('shows mafia drafts in a private council and closes it after confirmation', async () => {
+  it('shows mafia drafts in a private council and closes every mafia panel after confirmation', async () => {
     const game = { id: 'game-1', chatId: '-1001', phase: 'NIGHT', stateVersion: 7 } as Game;
     const mafiaOne = { id: 'mafia-1', userId: 'user-1', displayName: 'Мафия 1', role: 'MAFIA', status: 'ALIVE' } as Player;
     const mafiaTwo = { id: 'mafia-2', userId: 'user-2', displayName: 'Мафия 2', role: 'MAFIA', status: 'ALIVE' } as Player;
@@ -113,14 +113,22 @@ describe('NightActionService mafia council', () => {
     const ownConfirmedDraft = {
       actionType: 'MAFIA_KILL', actorPlayerId: mafiaOne.id, targetPlayerId: civilian.id, confirmedAt: new Date(),
     } as NightAction;
+    const teammateConfirmedDraft = {
+      actionType: 'MAFIA_KILL', actorPlayerId: mafiaTwo.id, targetPlayerId: civilian.id, confirmedAt: new Date(),
+    } as NightAction;
     const upsertMafiaDraft = vi.fn().mockResolvedValue({});
     const confirmMafiaDraft = vi.fn().mockResolvedValue(true);
-    const sendText = vi.fn().mockResolvedValue({ ephemeral_message_id: 1 });
+    const sendText = vi.fn()
+      .mockResolvedValueOnce({ ephemeral_message_id: 42 })
+      .mockResolvedValueOnce({ ephemeral_message_id: 43 });
     const editText = vi.fn().mockResolvedValue(undefined);
+    const deleteEphemeralMessage = vi.fn().mockResolvedValue(undefined);
     const service = new NightActionService(
       { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
       {
-        findByGameAndUserId: vi.fn().mockResolvedValue(mafiaOne),
+        findByGameAndUserId: vi.fn().mockImplementation(async (_gameId, userId) => (
+          userId === mafiaTwo.userId ? mafiaTwo : mafiaOne
+        )),
         listAlivePlayers: vi.fn().mockResolvedValue([mafiaOne, mafiaTwo, civilian]),
       } as unknown as PlayerRepository,
       {
@@ -128,9 +136,11 @@ describe('NightActionService mafia council', () => {
         confirmMafiaDraft,
         listActions: vi.fn()
           .mockResolvedValueOnce([teammateDraft, ownDraft])
-          .mockResolvedValueOnce([teammateDraft, ownConfirmedDraft]),
+          .mockResolvedValueOnce([teammateDraft, ownDraft])
+          .mockResolvedValueOnce([teammateDraft, ownConfirmedDraft])
+          .mockResolvedValueOnce([teammateConfirmedDraft, ownConfirmedDraft]),
       } as unknown as NightActionRepository,
-      { sendText, editText } as unknown as TelegramEphemeralAdapter,
+      { sendText, editText, deleteEphemeralMessage } as unknown as TelegramEphemeralAdapter,
       createLogger({ logLevel: 'silent' }),
     );
     const input = { gameId: game.id, phaseVersion: game.stateVersion, chatId: game.chatId, userId: mafiaOne.userId, callbackQueryId: 'query-1' };
@@ -153,6 +163,12 @@ describe('NightActionService mafia council', () => {
       }),
     }));
 
+    await service.openNightPanel({
+      ...input,
+      userId: mafiaTwo.userId,
+      callbackQueryId: 'query-2',
+    });
+
     await service.submitTarget({ ...input, ephemeralMessageId: 42, targetIndex: 2 });
 
     expect(editText).toHaveBeenCalledWith(expect.objectContaining({
@@ -162,15 +178,26 @@ describe('NightActionService mafia council', () => {
       text: expect.stringContaining('Совет мафии'),
       replyMarkup: expect.any(Object),
     }));
-    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenCalledTimes(2);
 
-    await service.confirmMafiaTarget(input);
+    await service.confirmMafiaTarget({ ...input, ephemeralMessageId: 42 });
 
     expect(confirmMafiaDraft).toHaveBeenCalledWith({
       gameId: game.id,
       phaseVersion: game.stateVersion,
       actorPlayerId: mafiaOne.id,
     });
-    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenCalledTimes(2);
+    expect(deleteEphemeralMessage).toHaveBeenCalledTimes(2);
+    expect(deleteEphemeralMessage).toHaveBeenCalledWith({
+      chatId: game.chatId,
+      receiverUserId: mafiaOne.userId,
+      ephemeralMessageId: 42,
+    });
+    expect(deleteEphemeralMessage).toHaveBeenCalledWith({
+      chatId: game.chatId,
+      receiverUserId: mafiaTwo.userId,
+      ephemeralMessageId: 43,
+    });
   });
 });

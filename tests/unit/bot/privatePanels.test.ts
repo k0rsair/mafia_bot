@@ -29,6 +29,26 @@ describe('group-only private panels', () => {
     expect(JSON.stringify(groupControl.replyMarkup)).not.toContain('MAFIA');
   });
 
+  it('deletes an ephemeral panel for its receiver', async () => {
+    let endpoint = '';
+    let requestBody: Record<string, unknown> | undefined;
+    const mockFetch: typeof fetch = async (input, init) => {
+      endpoint = String(input);
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+    };
+    const adapter = new TelegramEphemeralAdapter('1234567890:token-value', createLogger({ logLevel: 'silent' }), mockFetch);
+
+    await expect(adapter.deleteEphemeralMessage({
+      chatId: '-100123',
+      receiverUserId: '12345',
+      ephemeralMessageId: 42,
+    })).resolves.toBeUndefined();
+
+    expect(endpoint).toContain('/deleteEphemeralMessage');
+    expect(requestBody).toEqual({ chat_id: '-100123', receiver_user_id: 12345, ephemeral_message_id: 42 });
+  });
+
   it('rejects a callback replayed from another group', () => {
     const guard = new CallbackGuardService();
     expect(() => guard.assertGameChat({ chatId: '-100123' }, '-100456')).toThrow(CallbackGuardError);

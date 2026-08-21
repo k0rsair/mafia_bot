@@ -37,6 +37,8 @@ type NightCallbackInput = NightPanelInput & Readonly<{
 }>;
 
 export class NightActionService {
+  private readonly mafiaCouncilPanels = new Map<string, Map<string, Set<number>>>();
+
   public constructor(
     private readonly gameRepository: GameRepository,
     private readonly playerRepository: PlayerRepository,
@@ -155,8 +157,13 @@ export class NightActionService {
       throw new NightActionError('Сначала выберите цель или обновите совет мафии.');
     }
 
+    const allMafiaConfirmed = await this.areAllMafiaDraftsConfirmed(game);
+    const panelDeletion = allMafiaConfirmed
+      ? await this.deleteMafiaCouncilPanels(game, input)
+      : { deletedPanelCount: 0, failedPanelDeletionCount: 0 };
+
     this.logger.info(
-      { gameId: game.id, phaseVersion: game.stateVersion },
+      { gameId: game.id, phaseVersion: game.stateVersion, allMafiaConfirmed, ...panelDeletion },
       '[FIX:mafia-confirmation] Mafia draft confirmed without reopening council',
     );
   }
@@ -202,19 +209,93 @@ export class NightActionService {
         text: panel.text,
         replyMarkup: panel.replyMarkup,
       });
+      this.rememberMafiaCouncilPanel(game, player.userId, input.ephemeralMessageId);
     } else {
-      await this.ephemeralAdapter.sendText({
+      const sentPanel = await this.ephemeralAdapter.sendText({
         chatId: input.chatId,
         receiverUserId: input.userId,
         ...(input.callbackQueryId === undefined ? {} : { callbackQueryId: input.callbackQueryId }),
         text: panel.text,
         replyMarkup: panel.replyMarkup,
       });
+      this.rememberMafiaCouncilPanel(game, player.userId, sentPanel.ephemeral_message_id);
     }
     this.logger.debug(
       { gameId: game.id, phase: game.phase, candidateCount: candidates.length, mafiaDraftCount: selections.length, confirmedMafiaDraftCount: selections.filter((selection) => selection.confirmed).length, updatedExistingPanel: input.ephemeralMessageId !== undefined },
       '[FIX:mafia-council] Mafia council panel rendered',
     );
+  }
+
+  private async areAllMafiaDraftsConfirmed(game: Game): Promise<boolean> {
+    const [alivePlayers, actions] = await Promise.all([
+      this.playerRepository.listAlivePlayers(game.id),
+      this.nightActionRepository.listActions(game.id, game.stateVersion),
+    ]);
+    const aliveMafiaIds = alivePlayers
+      .filter((alivePlayer) => alivePlayer.role === 'MAFIA')
+      .map((alivePlayer) => alivePlayer.id);
+    const confirmedMafiaIds = new Set(actions.flatMap((action) =>
+      action.actionType === 'MAFIA_KILL' && action.confirmedAt !== null ? [action.actorPlayerId] : [],
+    ));
+
+    return aliveMafiaIds.length > 0 && aliveMafiaIds.every((playerId) => confirmedMafiaIds.has(playerId));
+  }
+
+  private async deleteMafiaCouncilPanels(game: Game, input: NightPanelInput): Promise<Readonly<{
+    deletedPanelCount: number;
+    failedPanelDeletionCount: number;
+  }>> {
+    if (input.ephemeralMessageId !== undefined) {
+      this.rememberMafiaCouncilPanel(game, input.userId, input.ephemeralMessageId);
+    }
+
+    const panelKey = this.getMafiaCouncilPanelKey(game);
+    const panelsByUser = this.mafiaCouncilPanels.get(panelKey);
+    if (panelsByUser === undefined) {
+      return { deletedPanelCount: 0, failedPanelDeletionCount: 0 };
+    }
+
+    const aliveMafiaUserIds = new Set((await this.playerRepository.listAlivePlayers(game.id))
+      .filter((alivePlayer) => alivePlayer.role === 'MAFIA')
+      .map((alivePlayer) => alivePlayer.userId));
+    const panelTargets = [...panelsByUser].flatMap(([receiverUserId, panelIds]) =>
+      aliveMafiaUserIds.has(receiverUserId)
+        ? [...panelIds].map((ephemeralMessageId) => ({ receiverUserId, ephemeralMessageId }))
+        : [],
+    );
+    const deletionResults = await Promise.allSettled(panelTargets.map((panel) =>
+      this.ephemeralAdapter.deleteEphemeralMessage({
+        chatId: game.chatId,
+        receiverUserId: panel.receiverUserId,
+        ephemeralMessageId: panel.ephemeralMessageId,
+      }),
+    ));
+    this.mafiaCouncilPanels.delete(panelKey);
+
+    const failedPanelDeletionCount = deletionResults.filter((result) => result.status === 'rejected').length;
+    if (failedPanelDeletionCount > 0) {
+      this.logger.warn(
+        { gameId: game.id, phaseVersion: game.stateVersion, failedPanelDeletionCount },
+        '[FIX:mafia-confirmation] Could not delete every confirmed mafia panel',
+      );
+    }
+    return {
+      deletedPanelCount: deletionResults.length - failedPanelDeletionCount,
+      failedPanelDeletionCount,
+    };
+  }
+
+  private rememberMafiaCouncilPanel(game: Game, receiverUserId: string, ephemeralMessageId: number): void {
+    const panelKey = this.getMafiaCouncilPanelKey(game);
+    const panelsByUser = this.mafiaCouncilPanels.get(panelKey) ?? new Map<string, Set<number>>();
+    const panelIds = panelsByUser.get(receiverUserId) ?? new Set<number>();
+    panelIds.add(ephemeralMessageId);
+    panelsByUser.set(receiverUserId, panelIds);
+    this.mafiaCouncilPanels.set(panelKey, panelsByUser);
+  }
+
+  private getMafiaCouncilPanelKey(game: Game): string {
+    return `${game.id}:${game.stateVersion}`;
   }
 
   private async getNightPlayer(gameId: string, phaseVersion: number, chatId: string, userId: string): Promise<Readonly<{ game: Game; player: Player }>> {
