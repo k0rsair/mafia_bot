@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BOT_COMMANDS, registerCommandMenu } from '../../../src/bot/commands/commandMenu.js';
+import { BOT_COMMANDS, getBotCommands, registerCommandMenu } from '../../../src/bot/commands/commandMenu.js';
 import { createLogger } from '../../../src/observability/logger.js';
 
 describe('Telegram command menu', () => {
@@ -26,5 +26,10 @@ describe('Telegram command menu', () => {
     await expect(registerCommandMenu({ setMyCommands }, createLogger({ logLevel: 'silent' }))).resolves.toBeUndefined();
 
     expect(setMyCommands).toHaveBeenCalledWith(BOT_COMMANDS);
+  });
+
+  it('adds the development test-game command only when enabled', () => {
+    expect(getBotCommands(false)).toEqual(BOT_COMMANDS);
+    expect(getBotCommands(true).map((command) => command.command)).toContain('testgame');
   });
 });

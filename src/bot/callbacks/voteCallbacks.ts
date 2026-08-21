@@ -2,19 +2,22 @@ import type { Bot, Context } from 'grammy';
 
 import type { DayService } from '../../application/DayService.js';
 import { VotingError, type VotingService } from '../../application/VotingService.js';
-import type { PhaseService } from '../../application/PhaseService.js';
+import type { PhaseDeadlineResult, PhaseService } from '../../application/PhaseService.js';
+import type { TestGameService } from '../../application/TestGameService.js';
 import type { AppLogger } from '../../observability/logger.js';
 import { isGameGroup } from '../authorization/chatPermissions.js';
 import { parseVoteCallback } from './callbackData.js';
 import { renderNightControl } from '../views/phaseView.js';
 import { renderVoteOutcome } from '../views/voteView.js';
 import { renderFinalView } from '../views/finalView.js';
+import { publishNightCompletion } from './ephemeralCallbacks.js';
 
 export function registerVoteCallbacks(
   bot: Bot<Context>,
   votingService: VotingService,
   dayService: DayService,
   phaseService: PhaseService,
+  testGameService: TestGameService,
   logger: AppLogger,
 ): void {
   bot.callbackQuery(/^v:/, async (context) => {
@@ -54,7 +57,7 @@ export function registerVoteCallbacks(
         await context.reply(renderFinalView(closure.finalization));
         return;
       }
-      await publishVoteClosure(context, closure, phaseService);
+      await publishVoteClosure(context, closure, phaseService, testGameService);
     } catch (error) {
       logger.warn({ gameId: callback.gameId, userId: String(context.from.id), error }, '[registerVoteCallbacks] Rejected vote callback');
       const text = error instanceof VotingError ? error.message : 'Не удалось принять голос. Попробуйте ещё раз.';
@@ -65,19 +68,19 @@ export function registerVoteCallbacks(
 
 export async function publishVoteClosure(
   context: Context,
-  closure: Readonly<{
-    game: Readonly<{ id: string; stateVersion: number }>;
-    resolution: Readonly<{
-      resolution: Readonly<{ outcome: 'ELIMINATION' | 'SKIP' | 'TIE' | 'NO_VOTES' }>;
-      eliminatedPlayer: Readonly<{ displayName: string }> | null;
-    }>;
-  }>,
+  closure: Extract<PhaseDeadlineResult, { kind: 'DAY_VOTE_RESOLVED' }>,
   phaseService: Pick<PhaseService, 'recordControlMessage'>,
+  testGameService: TestGameService,
 ): Promise<void> {
   await context.reply(renderVoteOutcome({
     outcome: closure.resolution.resolution.outcome,
     ...(closure.resolution.eliminatedPlayer === null ? {} : { eliminatedDisplayName: closure.resolution.eliminatedPlayer.displayName }),
   }));
+  const testCompletion = await testGameService.playVirtualNightActions(closure.game);
+  if (testCompletion !== null) {
+    await publishNightCompletion(context, testCompletion);
+    return;
+  }
   const nightView = renderNightControl(closure.game.id, closure.game.stateVersion);
   const controlMessage = await context.reply(nightView.text, { reply_markup: nightView.replyMarkup });
   await phaseService.recordControlMessage(closure.game.id, controlMessage.message_id);

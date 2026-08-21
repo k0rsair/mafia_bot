@@ -15,14 +15,22 @@ export const BOT_COMMANDS: readonly BotCommand[] = [
   { command: 'start', description: 'Начать работу с ботом' },
 ];
 
+const TEST_GAME_COMMAND: BotCommand = { command: 'testgame', description: 'Запустить тест с ботами' };
+
+export function getBotCommands(testGameEnabled: boolean): readonly BotCommand[] {
+  return testGameEnabled ? [...BOT_COMMANDS, TEST_GAME_COMMAND] : BOT_COMMANDS;
+}
+
 export async function registerCommandMenu(
   api: Readonly<{ setMyCommands(commands: readonly BotCommand[]): Promise<true> }>,
   logger: AppLogger,
+  testGameEnabled: boolean = false,
 ): Promise<void> {
+  const commands = getBotCommands(testGameEnabled);
   try {
-    await api.setMyCommands(BOT_COMMANDS);
-    logger.info({ commandCount: BOT_COMMANDS.length }, '[FIX:command-menu] Telegram command menu synchronised');
+    await api.setMyCommands(commands);
+    logger.info({ commandCount: commands.length, testGameEnabled }, '[FIX:command-menu] Telegram command menu synchronised');
   } catch (error) {
-    logger.error({ commandCount: BOT_COMMANDS.length, error }, '[FIX:command-menu] Failed to synchronise Telegram command menu');
+    logger.error({ commandCount: commands.length, testGameEnabled, error }, '[FIX:command-menu] Failed to synchronise Telegram command menu');
   }
 }

@@ -3,13 +3,14 @@ import { GameService } from './application/GameService.js';
 import { EphemeralPanelService } from './application/EphemeralPanelService.js';
 import { LobbyService } from './application/LobbyService.js';
 import { PhaseClock } from './application/PhaseClock.js';
-import { PhaseService } from './application/PhaseService.js';
+import { PhaseService, type PhaseDeadlineResult } from './application/PhaseService.js';
 import { NightActionService } from './application/NightActionService.js';
 import { NightResolutionService } from './application/NightResolutionService.js';
 import { DayService } from './application/DayService.js';
 import { VotingService } from './application/VotingService.js';
 import { GameFinalizationService } from './application/GameFinalizationService.js';
 import { RecoveryService } from './application/RecoveryService.js';
+import { TestGameService } from './application/TestGameService.js';
 import { loadConfig } from './config/env.js';
 import { createPrismaClient } from './infrastructure/db/prisma.js';
 import { GameRepository } from './infrastructure/repositories/GameRepository.js';
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
   const gameFinalizationService = new GameFinalizationService(gameRepository, playerRepository, logger);
   const dayService = new DayService(playerRepository, logger);
   const phaseService = new PhaseService(gameRepository, nightResolutionService, votingService, gameFinalizationService, config, logger);
+  const testGameService = new TestGameService(lobbyService, gameService, playerRepository, nightActionRepository, votingService, phaseService, logger);
   const ephemeralAdapter = new TelegramEphemeralAdapter(config.botToken, logger);
   const nightActionService = new NightActionService(gameRepository, playerRepository, nightActionRepository, ephemeralAdapter, logger);
   const ephemeralPanelService = new EphemeralPanelService(gameRepository, playerRepository, phaseService, nightActionService, ephemeralAdapter, logger);
@@ -54,8 +56,9 @@ async function main(): Promise<void> {
     votingService,
     gameFinalizationService,
     ephemeralAdapter,
+    testGameService,
   });
-  await registerCommandMenu(bot.api, logger);
+  await registerCommandMenu(bot.api, logger, config.testGameEnabled);
   const phaseClock = new PhaseClock(phaseJobRepository, phaseService, logger, async (result) => {
     if (result.kind === 'ROLE_CONFIRMATION_EXPIRED') {
       await bot.api.sendMessage(result.game.chatId, '⌛ Время подтверждения ролей истекло. Организатор может отменить игру или попросить игроков открыть панель снова.');
@@ -68,7 +71,8 @@ async function main(): Promise<void> {
       await bot.api.sendMessage(result.game.chatId, renderDayDiscussion());
     }
     if (result.kind === 'DAY_VOTE_STARTED') {
-      const view = await dayService.renderVote(result.game);
+      const virtualProgress = await testGameService.castVirtualVotes(result.game);
+      const view = await dayService.renderVote(result.game, virtualProgress ?? undefined);
       const controlMessage = await bot.api.sendMessage(result.game.chatId, view.text, { reply_markup: view.replyMarkup });
       await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
     }
@@ -77,9 +81,14 @@ async function main(): Promise<void> {
         outcome: result.resolution.resolution.outcome,
         ...(result.resolution.eliminatedPlayer === null ? {} : { eliminatedDisplayName: result.resolution.eliminatedPlayer.displayName }),
       }));
-      const nightView = renderNightControl(result.game.id, result.game.stateVersion);
-      const controlMessage = await bot.api.sendMessage(result.game.chatId, nightView.text, { reply_markup: nightView.replyMarkup });
-      await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+      const testCompletion = await testGameService.playVirtualNightActions(result.game);
+      if (testCompletion !== null) {
+        await publishVirtualNightCompletion(bot.api, testCompletion);
+      } else {
+        const nightView = renderNightControl(result.game.id, result.game.stateVersion);
+        const controlMessage = await bot.api.sendMessage(result.game.chatId, nightView.text, { reply_markup: nightView.replyMarkup });
+        await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+      }
     }
     if (result.kind === 'GAME_FINISHED') {
       if (result.voteResolution !== undefined) {
@@ -123,11 +132,17 @@ async function main(): Promise<void> {
         const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
         await gameRepository.setControlMessageId(game.id, message.message_id);
       } else if (game.phase === 'NIGHT') {
-        const view = renderNightControl(game.id, game.stateVersion);
-        const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
-        await gameRepository.setControlMessageId(game.id, message.message_id);
+        const testCompletion = await testGameService.playVirtualNightActions(game);
+        if (testCompletion !== null) {
+          await publishVirtualNightCompletion(bot.api, testCompletion);
+        } else {
+          const view = renderNightControl(game.id, game.stateVersion);
+          const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
+          await gameRepository.setControlMessageId(game.id, message.message_id);
+        }
       } else if (game.phase === 'DAY_VOTE') {
-        const view = await dayService.renderVote(game);
+        const virtualProgress = await testGameService.castVirtualVotes(game);
+        const view = await dayService.renderVote(game, virtualProgress ?? undefined);
         const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
         await gameRepository.setControlMessageId(game.id, message.message_id);
       } else if (game.phase === 'DAY_DISCUSSION') {
@@ -144,6 +159,29 @@ async function main(): Promise<void> {
     logger.info('[main] Disconnecting from database');
     await prisma.$disconnect();
   }
+}
+
+async function publishVirtualNightCompletion(
+  api: Readonly<{ sendMessage(chatId: string, text: string): Promise<unknown> }>,
+  completion: Extract<PhaseDeadlineResult, { kind: 'NIGHT_RESOLVED' | 'GAME_FINISHED' }> | null,
+): Promise<void> {
+  if (completion === null) {
+    return;
+  }
+
+  const resolution = completion.kind === 'GAME_FINISHED' ? completion.nightResolution : completion.resolution;
+  if (resolution === undefined) {
+    return;
+  }
+  const dawnText = resolution.eliminatedPlayer === null
+    ? '☀️ Рассвет. Этой ночью город никого не потерял.'
+    : `☀️ Рассвет. Ночью выбыл игрок: ${resolution.eliminatedPlayer.displayName}.`;
+  await api.sendMessage(completion.game.chatId, dawnText);
+  if (completion.kind === 'GAME_FINISHED') {
+    await api.sendMessage(completion.game.chatId, renderFinalView(completion.finalization));
+    return;
+  }
+  await api.sendMessage(completion.game.chatId, renderDayDiscussion());
 }
 
 void main().catch((error: unknown) => {

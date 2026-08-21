@@ -3,6 +3,7 @@ import type { Bot, Context } from 'grammy';
 import { EphemeralPanelError, type EphemeralPanelService } from '../../application/EphemeralPanelService.js';
 import { NightActionError, type NightActionService } from '../../application/NightActionService.js';
 import type { PhaseDeadlineResult, PhaseService } from '../../application/PhaseService.js';
+import type { TestGameService } from '../../application/TestGameService.js';
 import type { AppLogger } from '../../observability/logger.js';
 import { isGameGroup } from '../authorization/chatPermissions.js';
 import { parseGameCallback } from './callbackData.js';
@@ -15,6 +16,7 @@ export function registerEphemeralCallbacks(
   panelService: EphemeralPanelService,
   nightActionService: NightActionService,
   phaseService: PhaseService,
+  testGameService: TestGameService,
   logger: AppLogger,
 ): void {
   bot.callbackQuery(/^g:/, async (context) => {
@@ -61,6 +63,11 @@ export function registerEphemeralCallbacks(
       const result = await panelService.confirmRole(input);
       await context.answerCallbackQuery({ text: '✅ Роль подтверждена.' });
       if (result.nightStarted && result.nightGame !== undefined) {
+        const testCompletion = await testGameService.playVirtualNightActions(result.nightGame);
+        if (testCompletion !== null) {
+          await publishNightCompletion(context, testCompletion);
+          return;
+        }
         const view = renderNightControl(result.nightGame.id, result.nightGame.stateVersion);
         const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
         await panelService.recordControlMessage(result.nightGame.id, controlMessage.message_id);
@@ -75,7 +82,7 @@ export function registerEphemeralCallbacks(
   });
 }
 
-async function publishNightCompletion(
+export async function publishNightCompletion(
   context: Context,
   completion: Extract<PhaseDeadlineResult, { kind: 'NIGHT_RESOLVED' | 'GAME_FINISHED' }> | null,
 ): Promise<void> {

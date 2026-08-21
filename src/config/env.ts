@@ -3,6 +3,7 @@ import { z } from 'zod';
 const logLevels = ['debug', 'info', 'warn', 'error', 'silent'] as const;
 
 const positiveInteger = z.coerce.number().int().positive();
+const booleanEnvironment = z.enum(['true', 'false']).default('false').transform((value) => value === 'true');
 
 const environmentSchema = z.object({
   BOT_TOKEN: z.string().min(10, 'BOT_TOKEN must be set'),
@@ -17,6 +18,7 @@ const environmentSchema = z.object({
   DAY_DURATION_SECONDS: positiveInteger.default(180),
   VOTE_DURATION_SECONDS: positiveInteger.default(90),
   NIGHT_DURATION_SECONDS: positiveInteger.default(120),
+  TEST_GAME_ENABLED: booleanEnvironment,
 });
 
 export type AppConfig = Readonly<{
@@ -29,6 +31,7 @@ export type AppConfig = Readonly<{
   dayDurationSeconds: number;
   voteDurationSeconds: number;
   nightDurationSeconds: number;
+  testGameEnabled: boolean;
 }>;
 
 export class ConfigurationError extends Error {
@@ -58,5 +61,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     dayDurationSeconds: values.DAY_DURATION_SECONDS,
     voteDurationSeconds: values.VOTE_DURATION_SECONDS,
     nightDurationSeconds: values.NIGHT_DURATION_SECONDS,
+    testGameEnabled: values.TEST_GAME_ENABLED,
   };
 }

@@ -13,14 +13,24 @@ type HandlerSetup = Readonly<{
   listUnconfirmedRolePlayers: ReturnType<typeof vi.fn>;
   restorePanel: ReturnType<typeof vi.fn>;
   sendText: ReturnType<typeof vi.fn>;
+  createTestGame: ReturnType<typeof vi.fn>;
+  recordControlMessage: ReturnType<typeof vi.fn>;
 }>;
 
-function setupHandlers(game: Game | null): HandlerSetup {
+function setupHandlers(game: Game | null, testGameEnabled: boolean = false): HandlerSetup {
   const handlers = new Map<string, CommandHandler>();
   const getActiveGame = vi.fn().mockResolvedValue(game);
   const listUnconfirmedRolePlayers = vi.fn().mockResolvedValue([{ userId: 'player-2', displayName: 'Игрок 2' }]);
   const restorePanel = vi.fn().mockResolvedValue(undefined);
   const sendText = vi.fn().mockResolvedValue({ ephemeral_message_id: 42 });
+  const createTestGame = vi.fn().mockResolvedValue({
+    id: 'test-game',
+    chatId: '-1001',
+    creatorId: '101',
+    phase: 'ROLE_CONFIRMATION',
+    stateVersion: 7,
+  } as Game);
+  const recordControlMessage = vi.fn().mockResolvedValue(undefined);
   const bot = {
     command: vi.fn((name: string, handler: CommandHandler) => {
       handlers.set(name, handler);
@@ -30,13 +40,14 @@ function setupHandlers(game: Game | null): HandlerSetup {
 
   registerLobbyHandlers(bot, {
     lobbyService: { getActiveGame, listUnconfirmedRolePlayers },
-    gameService: {},
+    gameService: { recordControlMessage },
     phaseService: {},
     dayService: {},
     gameFinalizationService: {},
     ephemeralPanelService: { restorePanel },
     ephemeralAdapter: { sendText },
-    config: { lobbyMaxPlayers: 20 },
+    testGameService: { createTestGame },
+    config: { lobbyMaxPlayers: 20, testGameEnabled },
     logger: createLogger({ logLevel: 'silent' }),
   } as never);
 
@@ -52,19 +63,27 @@ function setupHandlers(game: Game | null): HandlerSetup {
     listUnconfirmedRolePlayers,
     restorePanel,
     sendText,
+    createTestGame,
+    recordControlMessage,
   };
 }
 
-function createGroupContext(userId: number, memberStatus: string = 'member'): Readonly<{ context: Context; reply: ReturnType<typeof vi.fn> }> {
+function createGroupContext(userId: number, memberStatus: string = 'member'): Readonly<{
+  context: Context;
+  reply: ReturnType<typeof vi.fn>;
+  editMessageText: ReturnType<typeof vi.fn>;
+}> {
   const reply = vi.fn().mockResolvedValue({ message_id: 1 });
+  const editMessageText = vi.fn().mockResolvedValue(true);
   return {
     context: {
       chat: { id: -1001, type: 'supergroup' },
       from: { id: userId },
       reply,
-      api: { getChatMember: vi.fn().mockResolvedValue({ status: memberStatus }) },
+      api: { getChatMember: vi.fn().mockResolvedValue({ status: memberStatus }), editMessageText },
     } as unknown as Context,
     reply,
+    editMessageText,
   };
 }
 
@@ -163,5 +182,30 @@ describe('role confirmation commands', () => {
 
     expect(handlers.restorePanel).not.toHaveBeenCalled();
     expect(reply).toHaveBeenCalledWith('ℹ️ Активной игры нет.');
+  });
+
+  it('keeps the test-game command disabled unless the environment enables it', async () => {
+    const handlers = setupHandlers(null);
+    const { context, reply } = createGroupContext(101);
+
+    await handlers.getCommand('testgame')(context);
+
+    expect(handlers.createTestGame).not.toHaveBeenCalled();
+    expect(reply).toHaveBeenCalledWith('ℹ️ Тестовый режим выключен. Установите TEST_GAME_ENABLED=true только в тестовой среде.');
+  });
+
+  it('starts an enabled test game with a group control message', async () => {
+    const handlers = setupHandlers(null, true);
+    const { context, editMessageText } = createGroupContext(101);
+
+    await handlers.getCommand('testgame')(context);
+
+    expect(handlers.createTestGame).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: '-1001',
+      creatorId: '101',
+      lobbyMessageId: 1,
+    }));
+    expect(handlers.recordControlMessage).toHaveBeenCalledWith('test-game', 1);
+    expect(editMessageText).toHaveBeenCalledWith(-1001, 1, expect.stringContaining('Четыре виртуальных игрока уже подтвердили роли.'), expect.objectContaining({ reply_markup: expect.any(Object) }));
   });
 });

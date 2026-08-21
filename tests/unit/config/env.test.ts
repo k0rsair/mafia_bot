@@ -17,11 +17,17 @@ describe('environment configuration', () => {
       dayDurationSeconds: 180,
       voteDurationSeconds: 90,
       nightDurationSeconds: 120,
+      testGameEnabled: false,
     });
   });
 
   it('rejects malformed bot credentials and non-PostgreSQL URLs', () => {
     expect(() => loadConfig({ ...validEnvironment, BOT_USERNAME: 'not-a-bot' })).toThrow(ConfigurationError);
     expect(() => loadConfig({ ...validEnvironment, DATABASE_URL: 'sqlite:///tmp/mafia.db' })).toThrow(ConfigurationError);
+  });
+
+  it('enables the test-game command only for an explicit true value', () => {
+    expect(loadConfig({ ...validEnvironment, TEST_GAME_ENABLED: 'true' }).testGameEnabled).toBe(true);
+    expect(loadConfig({ ...validEnvironment, TEST_GAME_ENABLED: 'false' }).testGameEnabled).toBe(false);
   });
 });

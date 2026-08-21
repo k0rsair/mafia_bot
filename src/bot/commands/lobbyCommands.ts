@@ -7,6 +7,7 @@ import type { PhaseService } from '../../application/PhaseService.js';
 import type { DayService } from '../../application/DayService.js';
 import { LobbyError, type LobbyService, type LobbySnapshot } from '../../application/LobbyService.js';
 import { NightActionError } from '../../application/NightActionService.js';
+import type { TestGameService } from '../../application/TestGameService.js';
 import type { AppConfig } from '../../config/env.js';
 import type { AppLogger } from '../../observability/logger.js';
 import { canManageGame, isGameGroup } from '../authorization/chatPermissions.js';
@@ -23,7 +24,8 @@ type LobbyHandlerDependencies = Readonly<{
   gameFinalizationService: GameFinalizationService;
   ephemeralPanelService: EphemeralPanelService;
   ephemeralAdapter: TelegramEphemeralAdapter;
-  config: Pick<AppConfig, 'lobbyMaxPlayers'>;
+  testGameService: TestGameService;
+  config: Pick<AppConfig, 'lobbyMaxPlayers' | 'testGameEnabled'>;
   logger: AppLogger;
 }>;
 
@@ -73,6 +75,42 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
     }
 
     await context.reply(renderLobby({ gameId: lobby.game.id, players: lobby.players, maxPlayers: dependencies.config.lobbyMaxPlayers }).text);
+  });
+
+  bot.command('testgame', async (context) => {
+    if (!dependencies.config.testGameEnabled) {
+      await context.reply('ℹ️ Тестовый режим выключен. Установите TEST_GAME_ENABLED=true только в тестовой среде.');
+      return;
+    }
+    if (!isGameGroup(context) || context.chat === undefined) {
+      await context.reply('👥 Эта команда доступна только в игровом групповом чате.');
+      return;
+    }
+
+    const user = getLobbyUser(context);
+    if (user === null) {
+      await context.reply('Не удалось определить игрока. Попробуйте ещё раз.');
+      return;
+    }
+
+    const placeholder = await context.reply('🧪 Создаю тестовую игру с четырьмя виртуальными игроками…');
+    try {
+      const game = await dependencies.testGameService.createTestGame({
+        chatId: String(context.chat.id),
+        creatorId: user.userId,
+        creatorDisplayName: user.displayName,
+        ...(user.username === undefined ? {} : { creatorUsername: user.username }),
+        ...(context.chat.title === undefined ? {} : { chatTitle: context.chat.title }),
+        lobbyMessageId: placeholder.message_id,
+      });
+      const view = renderRoleControl(game.id, game.stateVersion);
+      await context.api.editMessageText(context.chat.id, placeholder.message_id, `🧪 Тестовая игра готова. Четыре виртуальных игрока уже подтвердили роли.\n\n${view.text}`, { reply_markup: view.replyMarkup });
+      await dependencies.gameService.recordControlMessage(game.id, placeholder.message_id);
+      dependencies.logger.info({ gameId: game.id, chatId: game.chatId, virtualPlayerCount: 4 }, '[registerLobbyHandlers.testgame] Test game started');
+    } catch (error) {
+      dependencies.logger.error({ chatId: String(context.chat.id), error }, '[registerLobbyHandlers.testgame] Failed to start test game');
+      await context.api.editMessageText(context.chat.id, placeholder.message_id, `⚠️ ${toUserMessage(error)}`);
+    }
   });
 
   bot.command('roles_pending', async (context) => {
@@ -164,7 +202,8 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
     }
 
     dependencies.logger.info({ gameId: voteGame.id, chatId: voteGame.chatId }, '[FIX:manual-vote-start] Organizer started day vote');
-    const view = await dependencies.dayService.renderVote(voteGame);
+    const virtualProgress = await dependencies.testGameService.castVirtualVotes(voteGame);
+    const view = await dependencies.dayService.renderVote(voteGame, virtualProgress ?? undefined);
     const controlMessage = await context.reply(`🗳️ Организатор завершил обсуждение. Голосование начинается!\n\n${view.text}`, { reply_markup: view.replyMarkup });
     await dependencies.phaseService.recordControlMessage(voteGame.id, controlMessage.message_id);
   });
