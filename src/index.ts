@@ -7,7 +7,7 @@ import { PhaseService, type PhaseDeadlineResult } from './application/PhaseServi
 import { NightActionService } from './application/NightActionService.js';
 import { NightResolutionService } from './application/NightResolutionService.js';
 import { DayService } from './application/DayService.js';
-import { VotingService } from './application/VotingService.js';
+import { VotingService, type AppliedVoteResolution } from './application/VotingService.js';
 import { GameFinalizationService } from './application/GameFinalizationService.js';
 import { RecoveryService } from './application/RecoveryService.js';
 import { TestGameService } from './application/TestGameService.js';
@@ -22,7 +22,7 @@ import { createLogger } from './observability/logger.js';
 import { TelegramEphemeralAdapter } from './bot/telegram/ephemeral.js';
 import { renderDayDiscussion } from './bot/views/dayView.js';
 import { renderNightControl, renderRoleControl } from './bot/views/phaseView.js';
-import { renderVoteOutcome } from './bot/views/voteView.js';
+import { renderClosedVoteView } from './bot/views/voteView.js';
 import { renderFinalView } from './bot/views/finalView.js';
 import { registerCommandMenu } from './bot/commands/commandMenu.js';
 
@@ -59,6 +59,23 @@ async function main(): Promise<void> {
     testGameService,
   });
   await registerCommandMenu(bot.api, logger, config.testGameEnabled);
+  const closeVoteControlMessage = async (
+    game: Readonly<{ id: string; chatId: string; controlMessageId: number | null }>,
+    resolution: AppliedVoteResolution,
+  ): Promise<void> => {
+    if (game.controlMessageId === null) {
+      logger.warn({ gameId: game.id }, '[FIX:vote-closure] Vote control message was not recorded');
+      return;
+    }
+    try {
+      await bot.api.editMessageText(game.chatId, game.controlMessageId, renderClosedVoteView({
+        outcome: resolution.resolution.outcome,
+        ...(resolution.eliminatedPlayer === null ? {} : { eliminatedDisplayName: resolution.eliminatedPlayer.displayName }),
+      }), { reply_markup: { inline_keyboard: [] } });
+    } catch {
+      logger.warn({ gameId: game.id }, '[FIX:vote-closure] Could not close vote control message');
+    }
+  };
   const phaseClock = new PhaseClock(phaseJobRepository, phaseService, logger, async (result) => {
     if (result.kind === 'ROLE_CONFIRMATION_EXPIRED') {
       await bot.api.sendMessage(result.game.chatId, '⌛ Время подтверждения ролей истекло. Организатор может отменить игру или попросить игроков открыть панель снова.');
@@ -77,10 +94,7 @@ async function main(): Promise<void> {
       await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
     }
     if (result.kind === 'DAY_VOTE_RESOLVED') {
-      await bot.api.sendMessage(result.game.chatId, renderVoteOutcome({
-        outcome: result.resolution.resolution.outcome,
-        ...(result.resolution.eliminatedPlayer === null ? {} : { eliminatedDisplayName: result.resolution.eliminatedPlayer.displayName }),
-      }));
+      await closeVoteControlMessage(result.game, result.resolution);
       const testCompletion = await testGameService.playVirtualNightActions(result.game);
       if (testCompletion !== null) {
         await publishVirtualNightCompletion(bot.api, testCompletion);
@@ -92,10 +106,7 @@ async function main(): Promise<void> {
     }
     if (result.kind === 'GAME_FINISHED') {
       if (result.voteResolution !== undefined) {
-        await bot.api.sendMessage(result.game.chatId, renderVoteOutcome({
-          outcome: result.voteResolution.resolution.outcome,
-          ...(result.voteResolution.eliminatedPlayer === null ? {} : { eliminatedDisplayName: result.voteResolution.eliminatedPlayer.displayName }),
-        }));
+        await closeVoteControlMessage(result.game, result.voteResolution);
       }
       if (result.nightResolution !== undefined) {
         const dawnText = result.nightResolution.eliminatedPlayer === null

@@ -37,6 +37,10 @@ export function renderVoteOutcome(input: Readonly<{ outcome: 'ELIMINATION' | 'SK
   return '🤝 Голосов не было. Сегодня никто не выбывает.';
 }
 
+export function renderClosedVoteView(input: Readonly<{ outcome: 'ELIMINATION' | 'SKIP' | 'TIE' | 'NO_VOTES'; eliminatedDisplayName?: string }>): string {
+  return ['🗳️ Дневное голосование завершено.', '', 'Результат:', renderVoteOutcome(input)].join('\n');
+}
+
 function chunk<T>(items: readonly T[], size: number): T[][] {
   const rows: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
