@@ -24,7 +24,7 @@ describe('group-only private panels', () => {
     })).resolves.toEqual({ ephemeral_message_id: 42 });
 
     expect(requestBody).toMatchObject({ chat_id: '-100123', receiver_user_id: 12345, callback_query_id: 'callback-id' });
-    const groupControl = renderRoleControl('game-id', 2);
+    const groupControl = renderRoleControl();
     expect(groupControl.text).not.toMatch(/МАФИЯ|КОМИССАР|ДОКТОР|МИРНЫЙ/i);
     expect(JSON.stringify(groupControl.replyMarkup)).not.toContain('MAFIA');
   });

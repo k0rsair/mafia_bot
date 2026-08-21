@@ -1,17 +1,18 @@
 import type { Bot, Context } from 'grammy';
 
 import { GameStartError, type GameService } from '../../application/GameService.js';
-import { EphemeralPanelError, type EphemeralPanelService } from '../../application/EphemeralPanelService.js';
+import { EphemeralPanelError, type EphemeralPanelService, type RoleConfirmationResult } from '../../application/EphemeralPanelService.js';
 import type { GameFinalizationService } from '../../application/GameFinalizationService.js';
 import type { PhaseService } from '../../application/PhaseService.js';
 import type { DayService } from '../../application/DayService.js';
 import { LobbyError, type LobbyService, type LobbySnapshot } from '../../application/LobbyService.js';
-import { NightActionError } from '../../application/NightActionService.js';
+import { NightActionError, type NightActionService } from '../../application/NightActionService.js';
 import type { TestGameService } from '../../application/TestGameService.js';
 import type { AppConfig } from '../../config/env.js';
 import type { AppLogger } from '../../observability/logger.js';
 import { canManageGame, isGameGroup } from '../authorization/chatPermissions.js';
 import { parseLobbyCallback } from '../callbacks/callbackData.js';
+import { publishNightCompletion } from '../callbacks/ephemeralCallbacks.js';
 import type { TelegramEphemeralAdapter } from '../telegram/ephemeral.js';
 import { renderLobby } from '../views/lobbyView.js';
 import { renderNightControl, renderRoleControl } from '../views/phaseView.js';
@@ -23,6 +24,7 @@ type LobbyHandlerDependencies = Readonly<{
   dayService: DayService;
   gameFinalizationService: GameFinalizationService;
   ephemeralPanelService: EphemeralPanelService;
+  nightActionService: NightActionService;
   ephemeralAdapter: TelegramEphemeralAdapter;
   testGameService: TestGameService;
   config: Pick<AppConfig, 'lobbyMaxPlayers' | 'testGameEnabled'>;
@@ -103,9 +105,11 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
         ...(context.chat.title === undefined ? {} : { chatTitle: context.chat.title }),
         lobbyMessageId: placeholder.message_id,
       });
-      const view = renderRoleControl(game.id, game.stateVersion);
+      const view = renderRoleControl();
       await context.api.editMessageText(context.chat.id, placeholder.message_id, `🧪 Тестовая игра готова. Четыре виртуальных игрока уже подтвердили роли.\n\n${view.text}`, { reply_markup: view.replyMarkup });
       await dependencies.gameService.recordControlMessage(game.id, placeholder.message_id);
+      const delivery = await dependencies.ephemeralPanelService.deliverRolePanels(game);
+      await publishAutomaticRoleDeliveryCompletion(context, delivery, dependencies);
       dependencies.logger.info({ gameId: game.id, chatId: game.chatId, virtualPlayerCount: 4 }, '[registerLobbyHandlers.testgame] Test game started');
     } catch (error) {
       dependencies.logger.error({ chatId: String(context.chat.id), error }, '[registerLobbyHandlers.testgame] Failed to start test game');
@@ -252,9 +256,11 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
       await context.reply('⚠️ Фаза уже изменилась. Проверьте /mafia_status.');
       return;
     }
-    const view = renderRoleControl(extendedGame.id, extendedGame.stateVersion);
+    const view = renderRoleControl();
     const controlMessage = await context.reply(`⌛ Подтверждение ролей продлено.\n\n${view.text}`, { reply_markup: view.replyMarkup });
     await dependencies.phaseService.recordControlMessage(extendedGame.id, controlMessage.message_id);
+    const delivery = await dependencies.ephemeralPanelService.deliverRolePanels(extendedGame);
+    await publishAutomaticRoleDeliveryCompletion(context, delivery, dependencies);
   });
 
   bot.callbackQuery(/^l:/, async (context) => {
@@ -300,13 +306,13 @@ async function republishCurrentControl(
   dependencies: Pick<LobbyHandlerDependencies, 'dayService' | 'phaseService'>,
 ): Promise<void> {
   if (game.phase === 'ROLE_CONFIRMATION') {
-    const view = renderRoleControl(game.id, game.stateVersion);
+    const view = renderRoleControl();
     const controlMessage = await context.reply(`ℹ️ Фаза: подтверждение ролей.\n\n${view.text}`, { reply_markup: view.replyMarkup });
     await dependencies.phaseService.recordControlMessage(game.id, controlMessage.message_id);
     return;
   }
   if (game.phase === 'NIGHT') {
-    const view = renderNightControl(game.id, game.stateVersion);
+    const view = renderNightControl();
     const controlMessage = await context.reply(`ℹ️ Фаза: ночь.\n\n${view.text}`, { reply_markup: view.replyMarkup });
     await dependencies.phaseService.recordControlMessage(game.id, controlMessage.message_id);
     return;
@@ -349,9 +355,11 @@ async function startGameFromContext(context: Context, dependencies: LobbyHandler
   try {
     const game = await dependencies.gameService.startGame(lobby.game.id);
     dependencies.logger.info({ gameId: game.id, chatId: game.chatId }, '[startGameFromContext] Game start accepted');
-    const view = renderRoleControl(game.id, game.stateVersion);
+    const view = renderRoleControl();
     const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
     await dependencies.gameService.recordControlMessage(game.id, controlMessage.message_id);
+    const delivery = await dependencies.ephemeralPanelService.deliverRolePanels(game);
+    await publishAutomaticRoleDeliveryCompletion(context, delivery, dependencies);
     await context.answerCallbackQuery().catch(() => undefined);
   } catch (error) {
     dependencies.logger.warn({ gameId: lobby.game.id, error }, '[startGameFromContext] Game start rejected');
@@ -362,6 +370,27 @@ async function startGameFromContext(context: Context, dependencies: LobbyHandler
       await context.answerCallbackQuery({ text: message, show_alert: true });
     }
   }
+}
+
+async function publishAutomaticRoleDeliveryCompletion(
+  context: Context,
+  result: RoleConfirmationResult,
+  dependencies: LobbyHandlerDependencies,
+): Promise<void> {
+  if (!result.nightStarted || result.nightGame === undefined) {
+    return;
+  }
+
+  const testCompletion = await dependencies.testGameService.playVirtualNightActions(result.nightGame);
+  if (testCompletion !== null) {
+    await publishNightCompletion(context, testCompletion);
+    return;
+  }
+
+  const view = renderNightControl();
+  const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
+  await dependencies.gameService.recordControlMessage(result.nightGame.id, controlMessage.message_id);
+  await dependencies.nightActionService.deliverNightPanels(result.nightGame);
 }
 
 async function editLobbyMessage(context: Context, snapshot: LobbySnapshot, maxPlayers: number, logger: AppLogger): Promise<void> {

@@ -54,7 +54,7 @@ export function createBot(config: AppConfig, logger: AppLogger, dependencies: Bo
     logger,
   });
   registerEphemeralCallbacks(bot, dependencies.ephemeralPanelService, dependencies.nightActionService, dependencies.phaseService, dependencies.testGameService, logger);
-  registerVoteCallbacks(bot, dependencies.votingService, dependencies.dayService, dependencies.phaseService, dependencies.testGameService, logger);
+  registerVoteCallbacks(bot, dependencies.votingService, dependencies.dayService, dependencies.phaseService, dependencies.nightActionService, dependencies.testGameService, logger);
 
   bot.catch((error) => {
     logger.error(

@@ -1,25 +1,20 @@
 import type { InlineKeyboardMarkup } from 'grammy/types';
 
-import { encodeGameCallback } from '../callbacks/callbackData.js';
-
-export function renderRoleControl(gameId: string, phaseVersion: number): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
+export function renderRoleControl(): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
   return {
     text: [
       '🎭 Роли распределены!',
-      'Каждый игрок нажимает кнопку ниже, чтобы открыть скрытую панель прямо в этом чате.',
+      'Личные панели с ролями отправлены игрокам автоматически прямо в этот чат.',
       '🔒 Ваша роль видна только вам и боту.',
+      'Если панель не появилась, используйте /restore_panel.',
     ].join('\n'),
-    replyMarkup: {
-      inline_keyboard: [[{ text: '🔒 Открыть личную панель', callback_data: encodeGameCallback(gameId, phaseVersion, 'panel') }]],
-    },
+    replyMarkup: { inline_keyboard: [] },
   };
 }
 
-export function renderNightControl(gameId: string, phaseVersion: number): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
+export function renderNightControl(): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
   return {
-    text: '🌙 Ночь наступила. Если у вас есть ночное действие, откройте скрытую панель.',
-    replyMarkup: {
-      inline_keyboard: [[{ text: '🔒 Открыть личную панель', callback_data: encodeGameCallback(gameId, phaseVersion, 'panel') }]],
-    },
+    text: '🌙 Ночь наступила. Игроки с ночными действиями получили личные панели автоматически. Если панель не появилась, используйте /restore_panel.',
+    replyMarkup: { inline_keyboard: [] },
   };
 }

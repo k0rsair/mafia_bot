@@ -15,6 +15,7 @@ import type { GameRepository } from '../infrastructure/repositories/GameReposito
 import type { NightActionRepository } from '../infrastructure/repositories/NightActionRepository.js';
 import type { PlayerRepository } from '../infrastructure/repositories/PlayerRepository.js';
 import { CallbackGuardService } from './CallbackGuardService.js';
+import { isVirtualTestPlayer } from './TestGameService.js';
 
 export class NightActionError extends Error {
   public constructor(message: string) {
@@ -84,6 +85,36 @@ export class NightActionService {
       replyMarkup: panel.replyMarkup,
     });
     this.logger.debug({ gameId: game.id, phase: game.phase, candidateCount: candidates.length }, '[NightActionService.openNightPanel] Night panel opened');
+  }
+
+  public async deliverNightPanels(game: Game): Promise<void> {
+    if (game.phase !== 'NIGHT') {
+      return;
+    }
+
+    const recipients = (await this.playerRepository.listAlivePlayers(game.id))
+      .filter((player) => player.role !== null && player.role !== 'CIVILIAN' && !isVirtualTestPlayer(player.userId));
+    const deliveries = await Promise.allSettled(recipients.map((player) =>
+      this.openNightPanel({
+        gameId: game.id,
+        phaseVersion: game.stateVersion,
+        chatId: game.chatId,
+        userId: player.userId,
+      }),
+    ));
+    const failedPanelCount = deliveries.filter((delivery) => delivery.status === 'rejected').length;
+
+    this.logger.info(
+      {
+        gameId: game.id,
+        phase: game.phase,
+        stateVersion: game.stateVersion,
+        recipientCount: recipients.length,
+        deliveredPanelCount: deliveries.length - failedPanelCount,
+        failedPanelCount,
+      },
+      '[NightActionService.deliverNightPanels] Automatic night panels delivered',
+    );
   }
 
   public async submitTarget(input: NightCallbackInput & Readonly<{ targetIndex: number }>): Promise<void> {

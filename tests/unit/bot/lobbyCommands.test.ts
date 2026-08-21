@@ -14,6 +14,7 @@ type HandlerSetup = Readonly<{
   restorePanel: ReturnType<typeof vi.fn>;
   sendText: ReturnType<typeof vi.fn>;
   createTestGame: ReturnType<typeof vi.fn>;
+  deliverRolePanels: ReturnType<typeof vi.fn>;
   recordControlMessage: ReturnType<typeof vi.fn>;
 }>;
 
@@ -30,6 +31,7 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
     phase: 'ROLE_CONFIRMATION',
     stateVersion: 7,
   } as Game);
+  const deliverRolePanels = vi.fn().mockResolvedValue({ nightStarted: false });
   const recordControlMessage = vi.fn().mockResolvedValue(undefined);
   const bot = {
     command: vi.fn((name: string, handler: CommandHandler) => {
@@ -44,7 +46,7 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
     phaseService: {},
     dayService: {},
     gameFinalizationService: {},
-    ephemeralPanelService: { restorePanel },
+    ephemeralPanelService: { restorePanel, deliverRolePanels },
     ephemeralAdapter: { sendText },
     testGameService: { createTestGame },
     config: { lobbyMaxPlayers: 20, testGameEnabled },
@@ -64,6 +66,7 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
     restorePanel,
     sendText,
     createTestGame,
+    deliverRolePanels,
     recordControlMessage,
   };
 }
@@ -206,6 +209,7 @@ describe('role confirmation commands', () => {
       lobbyMessageId: 1,
     }));
     expect(handlers.recordControlMessage).toHaveBeenCalledWith('test-game', 1);
+    expect(handlers.deliverRolePanels).toHaveBeenCalledWith(expect.objectContaining({ id: 'test-game' }));
     expect(editMessageText).toHaveBeenCalledWith(-1001, 1, expect.stringContaining('Четыре виртуальных игрока уже подтвердили роли.'), expect.objectContaining({ reply_markup: expect.any(Object) }));
   });
 });

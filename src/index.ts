@@ -1,3 +1,5 @@
+import type { Game } from '@prisma/client';
+
 import { createBot } from './app/createBot.js';
 import { GameService } from './application/GameService.js';
 import { EphemeralPanelService } from './application/EphemeralPanelService.js';
@@ -78,9 +80,21 @@ async function main(): Promise<void> {
       logger.warn({ gameId: game.id }, '[FIX:vote-closure] Could not close vote control message');
     }
   };
+  const publishNightStart = async (game: Game): Promise<void> => {
+    const testCompletion = await testGameService.playVirtualNightActions(game);
+    if (testCompletion !== null) {
+      await publishVirtualNightCompletion(bot.api, testCompletion);
+      return;
+    }
+
+    const nightView = renderNightControl();
+    const controlMessage = await bot.api.sendMessage(game.chatId, nightView.text, { reply_markup: nightView.replyMarkup });
+    await gameRepository.setControlMessageId(game.id, controlMessage.message_id);
+    await nightActionService.deliverNightPanels(game);
+  };
   const phaseClock = new PhaseClock(phaseJobRepository, phaseService, logger, async (result) => {
     if (result.kind === 'ROLE_CONFIRMATION_EXPIRED') {
-      await bot.api.sendMessage(result.game.chatId, '⌛ Время подтверждения ролей истекло. Организатор может отменить игру или попросить игроков открыть панель снова.');
+      await bot.api.sendMessage(result.game.chatId, '⌛ Время подтверждения ролей истекло. Организатор может отменить игру или попросить игроков использовать /restore_panel.');
     }
     if (result.kind === 'NIGHT_RESOLVED') {
       const text = renderNightEvent({
@@ -100,14 +114,7 @@ async function main(): Promise<void> {
     }
     if (result.kind === 'DAY_VOTE_RESOLVED') {
       await closeVoteControlMessage(result.game, result.resolution);
-      const testCompletion = await testGameService.playVirtualNightActions(result.game);
-      if (testCompletion !== null) {
-        await publishVirtualNightCompletion(bot.api, testCompletion);
-      } else {
-        const nightView = renderNightControl(result.game.id, result.game.stateVersion);
-        const controlMessage = await bot.api.sendMessage(result.game.chatId, nightView.text, { reply_markup: nightView.replyMarkup });
-        await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
-      }
+      await publishNightStart(result.game);
     }
     if (result.kind === 'GAME_FINISHED') {
       if (result.voteResolution !== undefined) {
@@ -147,18 +154,15 @@ async function main(): Promise<void> {
     const recoveryService = new RecoveryService(gameRepository, logger);
     for (const game of await recoveryService.recoverActiveGames()) {
       if (game.phase === 'ROLE_CONFIRMATION') {
-        const view = renderRoleControl(game.id, game.stateVersion);
+        const view = renderRoleControl();
         const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
         await gameRepository.setControlMessageId(game.id, message.message_id);
-      } else if (game.phase === 'NIGHT') {
-        const testCompletion = await testGameService.playVirtualNightActions(game);
-        if (testCompletion !== null) {
-          await publishVirtualNightCompletion(bot.api, testCompletion);
-        } else {
-          const view = renderNightControl(game.id, game.stateVersion);
-          const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
-          await gameRepository.setControlMessageId(game.id, message.message_id);
+        const delivery = await ephemeralPanelService.deliverRolePanels(game);
+        if (delivery.nightStarted && delivery.nightGame !== undefined) {
+          await publishNightStart(delivery.nightGame);
         }
+      } else if (game.phase === 'NIGHT') {
+        await publishNightStart(game);
       } else if (game.phase === 'DAY_VOTE') {
         await testGameService.castVirtualVotes(game);
         const view = await dayService.renderVote(game);

@@ -27,6 +27,7 @@ describe('day vote callbacks', () => {
       },
     });
     const recordControlMessage = vi.fn().mockResolvedValue(undefined);
+    const deliverNightPanels = vi.fn().mockResolvedValue(undefined);
     const playVirtualNightActions = vi.fn().mockResolvedValue(null);
     const bot = {
       callbackQuery: vi.fn((_query: RegExp, handler: CallbackHandler) => handlers.push(handler)),
@@ -40,6 +41,7 @@ describe('day vote callbacks', () => {
       { castVote } as never,
       { renderVote: vi.fn().mockResolvedValue({ text: '🗳️ Дневное голосование', replyMarkup: { inline_keyboard: [[{ text: 'Игрок 2', callback_data: 'v:game-1:7:0' }]] } }) } as never,
       { closeDayVote, recordControlMessage } as never,
+      { deliverNightPanels } as never,
       { playVirtualNightActions } as never,
       createLogger({ logLevel: 'silent' }),
     );
@@ -75,5 +77,6 @@ describe('day vote callbacks', () => {
     expect(reply).toHaveBeenCalledTimes(1);
     expect(reply).toHaveBeenCalledWith(expect.stringContaining('Ночь наступила'), expect.any(Object));
     expect(recordControlMessage).toHaveBeenCalledWith(nightGame.id, 42);
+    expect(deliverNightPanels).toHaveBeenCalledWith(nightGame);
   });
 });

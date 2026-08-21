@@ -42,7 +42,7 @@ export function registerEphemeralCallbacks(
       if (callback.action === 'panel') {
         const result = await panelService.openPanel(input);
         await context.answerCallbackQuery();
-        await publishRoleConfirmationCompletion(context, result, panelService, testGameService);
+        await publishRoleConfirmationCompletion(context, result, panelService, nightActionService, testGameService);
         return;
       }
 
@@ -67,7 +67,7 @@ export function registerEphemeralCallbacks(
 
       const result = await panelService.confirmRole(input);
       await context.answerCallbackQuery({ text: '✅ Роль подтверждена.' });
-      await publishRoleConfirmationCompletion(context, result, panelService, testGameService);
+      await publishRoleConfirmationCompletion(context, result, panelService, nightActionService, testGameService);
     } catch (error) {
       logger.warn({ gameId: callback.gameId, userId: input.userId, error }, '[registerEphemeralCallbacks] Rejected ephemeral callback');
       const text = error instanceof EphemeralPanelError || error instanceof NightActionError
@@ -82,6 +82,7 @@ async function publishRoleConfirmationCompletion(
   context: Context,
   result: RoleConfirmationResult,
   panelService: EphemeralPanelService,
+  nightActionService: Pick<NightActionService, 'deliverNightPanels'>,
   testGameService: TestGameService,
 ): Promise<void> {
   if (!result.nightStarted || result.nightGame === undefined) {
@@ -93,9 +94,10 @@ async function publishRoleConfirmationCompletion(
     await publishNightCompletion(context, testCompletion);
     return;
   }
-  const view = renderNightControl(result.nightGame.id, result.nightGame.stateVersion);
+  const view = renderNightControl();
   const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
   await panelService.recordControlMessage(result.nightGame.id, controlMessage.message_id);
+  await nightActionService.deliverNightPanels(result.nightGame);
 }
 
 export async function publishNightCompletion(

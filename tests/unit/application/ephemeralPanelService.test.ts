@@ -75,6 +75,41 @@ describe('EphemeralPanelService panel restoration', () => {
 });
 
 describe('EphemeralPanelService automatic role confirmation', () => {
+  it('delivers role panels automatically to unconfirmed real players', async () => {
+    const game = { id: 'game-1', chatId: '-1001', phase: 'ROLE_CONFIRMATION', stateVersion: 7, phaseDeadline: new Date(Date.now() + 60_000) } as Game;
+    const humanPlayer = { id: 'player-1', userId: 'user-1', role: 'DOCTOR', status: 'ALIVE', roleConfirmedAt: null } as Player;
+    const virtualPlayer = { id: 'player-2', userId: 'test-player:1', role: 'MAFIA', status: 'ALIVE', roleConfirmedAt: new Date() } as Player;
+    const nightGame = { ...game, phase: 'NIGHT', stateVersion: 8 } as Game;
+    const sendText = vi.fn().mockResolvedValue({ ephemeral_message_id: 42 });
+    const confirmRole = vi.fn().mockResolvedValue(true);
+    const startNight = vi.fn().mockResolvedValue(nightGame);
+    const players = [humanPlayer, virtualPlayer];
+    const service = new EphemeralPanelService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockResolvedValue(humanPlayer),
+        listAlivePlayers: vi.fn().mockResolvedValue(players),
+        confirmRole,
+        countRoleConfirmations: vi.fn().mockResolvedValue(players.length),
+      } as unknown as PlayerRepository,
+      { startNight } as unknown as PhaseService,
+      {} as NightActionService,
+      { sendText } as unknown as TelegramEphemeralAdapter,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await expect(service.deliverRolePanels(game)).resolves.toEqual({ nightStarted: true, nightGame });
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: game.chatId,
+      receiverUserId: humanPlayer.userId,
+      text: expect.stringContaining('ДОКТОР'),
+    }));
+    expect(confirmRole).toHaveBeenCalledWith(game.id, humanPlayer.userId);
+    expect(startNight).toHaveBeenCalledWith(game);
+  });
+
   it('confirms a delivered role panel and starts night for the last player', async () => {
     const game = { id: 'game-1', chatId: '-1001', phase: 'ROLE_CONFIRMATION', stateVersion: 7, phaseDeadline: new Date(Date.now() + 60_000) } as Game;
     const player = { id: 'player-1', userId: 'user-1', role: 'COMMISSIONER', status: 'ALIVE' } as Player;

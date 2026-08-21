@@ -108,6 +108,33 @@ describe('NightActionService commissioner checks', () => {
 });
 
 describe('NightActionService panel restoration', () => {
+  it('delivers night panels automatically to real action roles only', async () => {
+    const game = { id: 'game-1', chatId: '-1001', phase: 'NIGHT', stateVersion: 7 } as Game;
+    const mafia = { id: 'mafia-1', userId: 'user-1', displayName: 'Мафия', role: 'MAFIA', status: 'ALIVE' } as Player;
+    const doctor = { id: 'doctor-1', userId: 'user-2', displayName: 'Доктор', role: 'DOCTOR', status: 'ALIVE' } as Player;
+    const commissioner = { id: 'commissioner-1', userId: 'user-3', displayName: 'Комиссар', role: 'COMMISSIONER', status: 'ALIVE' } as Player;
+    const civilian = { id: 'civilian-1', userId: 'user-4', displayName: 'Мирный', role: 'CIVILIAN', status: 'ALIVE' } as Player;
+    const virtualMafia = { id: 'mafia-2', userId: 'test-player:1', displayName: 'Тестовая мафия', role: 'MAFIA', status: 'ALIVE' } as Player;
+    const players = [mafia, doctor, commissioner, civilian, virtualMafia];
+    const sendText = vi.fn().mockResolvedValue({ ephemeral_message_id: 1 });
+    const service = new NightActionService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockImplementation(async (_gameId, userId) => players.find((player) => player.userId === userId) ?? null),
+        listAlivePlayers: vi.fn().mockResolvedValue(players),
+      } as unknown as PlayerRepository,
+      { listActions: vi.fn().mockResolvedValue([]) } as unknown as NightActionRepository,
+      { sendText } as unknown as TelegramEphemeralAdapter,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await service.deliverNightPanels(game);
+
+    expect(sendText).toHaveBeenCalledTimes(3);
+    expect(sendText.mock.calls.map(([input]) => input.receiverUserId).sort()).toEqual([mafia.userId, doctor.userId, commissioner.userId].sort());
+    expect(sendText.mock.calls.every(([input]) => !Object.hasOwn(input, 'callbackQueryId'))).toBe(true);
+  });
+
   it('opens a current night panel without a callback query ID', async () => {
     const game = { id: 'game-1', chatId: '-1001', phase: 'NIGHT', stateVersion: 7 } as Game;
     const civilian = { id: 'civilian-player', userId: 'user-1', role: 'CIVILIAN', status: 'ALIVE' } as Player;

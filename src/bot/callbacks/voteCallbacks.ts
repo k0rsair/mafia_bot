@@ -1,6 +1,7 @@
 import type { Bot, Context } from 'grammy';
 
 import type { DayService } from '../../application/DayService.js';
+import type { NightActionService } from '../../application/NightActionService.js';
 import { VotingError, type AppliedVoteResolution, type VotingService } from '../../application/VotingService.js';
 import type { PhaseDeadlineResult, PhaseService } from '../../application/PhaseService.js';
 import type { TestGameService } from '../../application/TestGameService.js';
@@ -17,6 +18,7 @@ export function registerVoteCallbacks(
   votingService: VotingService,
   dayService: DayService,
   phaseService: PhaseService,
+  nightActionService: NightActionService,
   testGameService: TestGameService,
   logger: AppLogger,
 ): void {
@@ -56,7 +58,7 @@ export function registerVoteCallbacks(
         await context.reply(renderFinalView(closure.finalization));
         return;
       }
-      await publishVoteClosure(context, closure, phaseService, testGameService);
+      await publishVoteClosure(context, closure, phaseService, nightActionService, testGameService);
       await context.answerCallbackQuery({ text: '✅ Голос принят.' });
     } catch (error) {
       logger.warn({ gameId: callback.gameId, userId: String(context.from.id), error }, '[registerVoteCallbacks] Rejected vote callback');
@@ -70,6 +72,7 @@ export async function publishVoteClosure(
   context: Context,
   closure: Extract<PhaseDeadlineResult, { kind: 'DAY_VOTE_RESOLVED' }>,
   phaseService: Pick<PhaseService, 'recordControlMessage'>,
+  nightActionService: Pick<NightActionService, 'deliverNightPanels'>,
   testGameService: TestGameService,
 ): Promise<void> {
   await closeVoteMessage(context, closure.resolution);
@@ -78,9 +81,10 @@ export async function publishVoteClosure(
     await publishNightCompletion(context, testCompletion);
     return;
   }
-  const nightView = renderNightControl(closure.game.id, closure.game.stateVersion);
+  const nightView = renderNightControl();
   const controlMessage = await context.reply(nightView.text, { reply_markup: nightView.replyMarkup });
   await phaseService.recordControlMessage(closure.game.id, controlMessage.message_id);
+  await nightActionService.deliverNightPanels(closure.game);
 }
 
 async function closeVoteMessage(context: Context, resolution: AppliedVoteResolution): Promise<void> {

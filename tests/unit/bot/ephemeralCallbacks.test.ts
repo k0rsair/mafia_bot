@@ -14,6 +14,7 @@ describe('ephemeral role-panel callbacks', () => {
     const nightGame = { id: 'game-1', chatId: '-1001', phase: 'NIGHT', stateVersion: 8 } as Game;
     const openPanel = vi.fn().mockResolvedValue({ nightStarted: true, nightGame });
     const recordControlMessage = vi.fn().mockResolvedValue(undefined);
+    const deliverNightPanels = vi.fn().mockResolvedValue(undefined);
     const playVirtualNightActions = vi.fn().mockResolvedValue(null);
     const bot = {
       callbackQuery: vi.fn((_query: RegExp, handler: CallbackHandler) => handlers.push(handler)),
@@ -24,7 +25,7 @@ describe('ephemeral role-panel callbacks', () => {
     registerEphemeralCallbacks(
       bot,
       { openPanel, recordControlMessage } as never,
-      {} as never,
+      { deliverNightPanels } as never,
       {} as never,
       { playVirtualNightActions } as never,
       createLogger({ logLevel: 'silent' }),
@@ -58,6 +59,7 @@ describe('ephemeral role-panel callbacks', () => {
       expect.objectContaining({ reply_markup: expect.any(Object) }),
     );
     expect(recordControlMessage).toHaveBeenCalledWith(nightGame.id, 42);
+    expect(deliverNightPanels).toHaveBeenCalledWith(nightGame);
   });
 
   it('forwards the ephemeral message ID when mafia chooses a target', async () => {

@@ -7,6 +7,7 @@ import type { GameRepository } from '../infrastructure/repositories/GameReposito
 import type { PlayerRepository } from '../infrastructure/repositories/PlayerRepository.js';
 import type { PhaseService } from './PhaseService.js';
 import type { NightActionService } from './NightActionService.js';
+import { isVirtualTestPlayer } from './TestGameService.js';
 import { CallbackGuardService } from './CallbackGuardService.js';
 
 export class EphemeralPanelError extends Error {
@@ -52,6 +53,41 @@ export class EphemeralPanelService {
     }
 
     return this.openRolePanel(input, true);
+  }
+
+  public async deliverRolePanels(game: Game): Promise<RoleConfirmationResult> {
+    if (game.phase !== 'ROLE_CONFIRMATION') {
+      return { nightStarted: false };
+    }
+
+    const recipients = (await this.playerRepository.listAlivePlayers(game.id))
+      .filter((player) => player.roleConfirmedAt === null && !isVirtualTestPlayer(player.userId));
+    const deliveries = await Promise.allSettled(recipients.map((player) =>
+      this.openRolePanel({
+        gameId: game.id,
+        phaseVersion: game.stateVersion,
+        chatId: game.chatId,
+        userId: player.userId,
+      }, true),
+    ));
+    const startedNight = deliveries.find((delivery): delivery is PromiseFulfilledResult<RoleConfirmationResult> =>
+      delivery.status === 'fulfilled' && delivery.value.nightStarted,
+    )?.value;
+    const failedPanelCount = deliveries.filter((delivery) => delivery.status === 'rejected').length;
+
+    this.logger.info(
+      {
+        gameId: game.id,
+        phase: game.phase,
+        stateVersion: game.stateVersion,
+        recipientCount: recipients.length,
+        deliveredPanelCount: deliveries.length - failedPanelCount,
+        failedPanelCount,
+      },
+      '[EphemeralPanelService.deliverRolePanels] Automatic role panels delivered',
+    );
+
+    return startedNight ?? this.startNightIfAllRolesConfirmed(game);
   }
 
   public async restorePanel(input: Readonly<{ gameId: string; chatId: string; userId: string }>): Promise<void> {
@@ -109,12 +145,16 @@ export class EphemeralPanelService {
 
   private async recordRoleConfirmation(game: Game, player: Player): Promise<RoleConfirmationResult> {
     const confirmed = await this.playerRepository.confirmRole(game.id, player.userId);
+    return this.startNightIfAllRolesConfirmed(game, confirmed);
+  }
+
+  private async startNightIfAllRolesConfirmed(game: Game, confirmed?: boolean): Promise<RoleConfirmationResult> {
     const confirmedCount = await this.playerRepository.countRoleConfirmations(game.id);
     const alivePlayers = await this.playerRepository.listAlivePlayers(game.id);
 
     if (confirmedCount !== alivePlayers.length) {
       this.logger.info(
-        { gameId: game.id, phase: game.phase, stateVersion: game.stateVersion, confirmedCount, playerCount: alivePlayers.length, confirmed },
+        { gameId: game.id, phase: game.phase, stateVersion: game.stateVersion, confirmedCount, playerCount: alivePlayers.length, ...(confirmed === undefined ? {} : { confirmed }) },
         '[FIX:auto-role-confirmation] Waiting for role confirmations',
       );
       return { nightStarted: false };
@@ -122,7 +162,7 @@ export class EphemeralPanelService {
 
     const night = await this.phaseService.startNight(game);
     this.logger.info(
-      { gameId: game.id, phase: game.phase, stateVersion: game.stateVersion, confirmedCount, playerCount: alivePlayers.length, confirmed, nightStarted: night !== null },
+      { gameId: game.id, phase: game.phase, stateVersion: game.stateVersion, confirmedCount, playerCount: alivePlayers.length, ...(confirmed === undefined ? {} : { confirmed }), nightStarted: night !== null },
       '[FIX:auto-role-confirmation] All role deliveries confirmed',
     );
     return night === null ? { nightStarted: false } : { nightStarted: true, nightGame: night };
