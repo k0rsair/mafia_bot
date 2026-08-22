@@ -133,6 +133,75 @@ describe('TestGameService', () => {
     expect(progress).toMatchObject({ votesCast: 8, votersTotal: 9, allVoted: false });
   });
 
+  it('records a virtual prostitute visit on the first night and completes that stage', async () => {
+    const prostituteNight = { ...game, phase: 'NIGHT_PROSTITUTE' } as Game;
+    const regularNight = { ...game, phase: 'NIGHT', stateVersion: 8 } as Game;
+    const virtualProstitute = { id: 'virtual-5', userId: 'test-player:5', displayName: '🤖 Путана', role: 'PROSTITUTE', status: 'ALIVE' } as Player;
+    const createRestrictedSingleUseAction = vi.fn().mockResolvedValue({ action: { id: 'visit-1' }, rejection: null });
+    const completeProstituteNight = vi.fn().mockResolvedValue(regularNight);
+    const service = new TestGameService(
+      {} as LobbyService,
+      {} as GameService,
+      { listAlivePlayers: vi.fn().mockResolvedValue([humanPlayer, virtualProstitute, ...virtualPlayers]) } as unknown as PlayerRepository,
+      { createRestrictedSingleUseAction, getLatestTarget: vi.fn().mockResolvedValue(null) } as unknown as NightActionRepository,
+      {} as VotingService,
+      { completeProstituteNight } as unknown as PhaseService,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await expect(service.playVirtualProstituteAction(prostituteNight)).resolves.toEqual(regularNight);
+
+    expect(createRestrictedSingleUseAction).toHaveBeenCalledWith(expect.objectContaining({
+      gameId: prostituteNight.id,
+      phaseVersion: prostituteNight.stateVersion,
+      actionType: 'PROSTITUTE_VISIT',
+      actorPlayerId: virtualProstitute.id,
+      rejectRepeatedTarget: true,
+    }));
+    expect(completeProstituteNight).toHaveBeenCalledWith(prostituteNight.id, prostituteNight.stateVersion);
+  });
+
+  it('still completes the prostitute stage when a virtual visit cannot be created', async () => {
+    const prostituteNight = { ...game, phase: 'NIGHT_PROSTITUTE' } as Game;
+    const regularNight = { ...game, phase: 'NIGHT', stateVersion: 8 } as Game;
+    const virtualProstitute = { id: 'virtual-5', userId: 'test-player:5', displayName: '🤖 Путана', role: 'PROSTITUTE', status: 'ALIVE' } as Player;
+    const completeProstituteNight = vi.fn().mockResolvedValue(regularNight);
+    const service = new TestGameService(
+      {} as LobbyService,
+      {} as GameService,
+      { listAlivePlayers: vi.fn().mockResolvedValue([virtualProstitute]) } as unknown as PlayerRepository,
+      { getLatestTarget: vi.fn().mockResolvedValue(null) } as unknown as NightActionRepository,
+      {} as VotingService,
+      { completeProstituteNight } as unknown as PhaseService,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await expect(service.playVirtualProstituteAction(prostituteNight)).resolves.toEqual(regularNight);
+
+    expect(completeProstituteNight).toHaveBeenCalledWith(prostituteNight.id, prostituteNight.stateVersion);
+  });
+
+  it('leaves a human prostitute to act from the private panel', async () => {
+    const prostituteNight = { ...game, phase: 'NIGHT_PROSTITUTE' } as Game;
+    const humanProstitute = { ...humanPlayer, role: 'PROSTITUTE' } as Player;
+    const createRestrictedSingleUseAction = vi.fn();
+    const completeProstituteNight = vi.fn();
+    const service = new TestGameService(
+      {} as LobbyService,
+      {} as GameService,
+      { listAlivePlayers: vi.fn().mockResolvedValue([humanProstitute, ...virtualPlayers]) } as unknown as PlayerRepository,
+      { createRestrictedSingleUseAction, getLatestTarget: vi.fn() } as unknown as NightActionRepository,
+      {} as VotingService,
+      { completeProstituteNight } as unknown as PhaseService,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await expect(service.playVirtualProstituteAction(prostituteNight)).resolves.toBeNull();
+
+    expect(createRestrictedSingleUseAction).not.toHaveBeenCalled();
+    expect(completeProstituteNight).not.toHaveBeenCalled();
+  });
+
   it('recognises only its own virtual player IDs', () => {
     expect(isVirtualTestPlayer('test-player:1')).toBe(true);
     expect(isVirtualTestPlayer('101')).toBe(false);
