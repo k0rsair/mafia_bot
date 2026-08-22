@@ -1,16 +1,16 @@
 import { randomInt } from 'node:crypto';
 
-import { calculateRoleDistribution } from './rules.js';
-import type { Role, RoleAssignment } from './types.js';
+import { calculateRoleDistribution, DEFAULT_ROLE_DISTRIBUTIONS } from './rules.js';
+import type { Role, RoleAssignment, RoleDistributions } from './types.js';
 import { GameRuleError } from './types.js';
 
-export function assignRoles(playerIds: readonly string[]): RoleAssignment[] {
+export function assignRoles(playerIds: readonly string[], distributions: RoleDistributions = DEFAULT_ROLE_DISTRIBUTIONS): RoleAssignment[] {
   const uniquePlayerIds = [...new Set(playerIds)];
   if (uniquePlayerIds.length !== playerIds.length) {
     throw new GameRuleError('Cannot assign roles to duplicate players');
   }
 
-  const distribution = calculateRoleDistribution(uniquePlayerIds.length);
+  const distribution = calculateRoleDistribution(uniquePlayerIds.length, distributions);
   const rolePool = buildRolePool(distribution);
   const shuffledPlayerIds = shuffle([...uniquePlayerIds]);
   const shuffledRoles = shuffle(rolePool);

@@ -1,7 +1,7 @@
 import type { Game, Player } from '@prisma/client';
 
-import { MAX_PLAYERS, validateLobbySize } from '../domain/game/rules.js';
-import { GameRuleError } from '../domain/game/types.js';
+import { DEFAULT_ROLE_DISTRIBUTIONS, getDistributionBounds, validateLobbySize } from '../domain/game/rules.js';
+import { GameRuleError, type RoleDistributions } from '../domain/game/types.js';
 import type { AppLogger } from '../observability/logger.js';
 import type { GameRepository } from '../infrastructure/repositories/GameRepository.js';
 import type { PlayerRepository, UnconfirmedRolePlayer } from '../infrastructure/repositories/PlayerRepository.js';
@@ -30,13 +30,32 @@ export class LobbyError extends Error {
   }
 }
 
+type LobbyLimits = number | Readonly<{
+  lobbyMaxPlayers?: number;
+  minPlayers?: number;
+  maxPlayers?: number;
+  roleDistributions?: RoleDistributions;
+}>;
+
 export class LobbyService {
+  private readonly maxPlayers: number;
+  private readonly minPlayers: number;
+  private readonly tableMaxPlayers: number;
+  private readonly roleDistributions: RoleDistributions;
+
   public constructor(
     private readonly gameRepository: GameRepository,
     private readonly playerRepository: PlayerRepository,
     private readonly logger: AppLogger,
-    private readonly maxPlayers: number = MAX_PLAYERS,
-  ) {}
+    limits: LobbyLimits = {},
+  ) {
+    const resolved = typeof limits === 'number' ? { lobbyMaxPlayers: limits } : limits;
+    this.roleDistributions = resolved.roleDistributions ?? DEFAULT_ROLE_DISTRIBUTIONS;
+    const bounds = getDistributionBounds(this.roleDistributions);
+    this.minPlayers = resolved.minPlayers ?? bounds.minPlayers;
+    this.tableMaxPlayers = resolved.maxPlayers ?? bounds.maxPlayers;
+    this.maxPlayers = resolved.lobbyMaxPlayers ?? this.tableMaxPlayers;
+  }
 
   public async createLobby(input: CreateLobbyInput): Promise<LobbySnapshot> {
     this.logger.debug({ chatId: input.chatId, creatorId: input.userId }, '[LobbyService.createLobby] Creating lobby');
@@ -131,11 +150,11 @@ export class LobbyService {
   public async validateStart(gameId: string): Promise<LobbySnapshot> {
     const snapshot = await this.getLobby(gameId);
     try {
-      validateLobbySize(snapshot.players.length);
+      validateLobbySize(snapshot.players.length, this.roleDistributions);
     } catch (error) {
       this.logger.warn(
-        { gameId, playerCount: snapshot.players.length },
-        '[FIX:lobby-min-players] Rejected start outside supported lobby size',
+        { gameId, playerCount: snapshot.players.length, minPlayers: this.minPlayers, maxPlayers: this.tableMaxPlayers },
+        '[LobbyService.validateStart] Rejected start outside supported lobby size',
       );
       const message = error instanceof GameRuleError ? error.message : 'Не удалось проверить состав лобби.';
       throw new LobbyError(message);

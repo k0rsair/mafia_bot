@@ -51,7 +51,8 @@ npm start
 | `BOT_USERNAME` | — | Username бота, оканчивается на `bot` |
 | `DATABASE_URL` | — | PostgreSQL connection URL |
 | `LOG_LEVEL` | `debug` | Для production используйте `info` или `warn` |
-| `LOBBY_MAX_PLAYERS` | `15` | Верхняя граница лобби, не больше 15; начать новую игру можно только с 6–15 игроками |
+| `LOBBY_MAX_PLAYERS` | max ключа таблицы | Потолок join/UI; обязан попадать в `[minPlayers, maxPlayers]` таблицы ролей |
+| `ROLE_DISTRIBUTIONS` | таблица 6–15 | Опциональный JSON `{ "6": { MAFIA, DON, COMMISSIONER, DOCTOR, PROSTITUTE, MANIAC, CIVILIAN }, ... }`. Пустое значение использует скомпилированный дефолт. Ключи — непрерывный диапазон; в каждой строке все 7 ролей, сумма счётчиков равна размеру стола. Пример одной строки: `{"6":{"MAFIA":0,"DON":1,"COMMISSIONER":1,"DOCTOR":0,"PROSTITUTE":0,"MANIAC":0,"CIVILIAN":4}}` |
 | `ROLE_CONFIRMATION_DURATION_SECONDS` | `300` | Время подтверждения ролей |
 | `NIGHT_DURATION_SECONDS` | `120` | Длительность этапа Шлюхи и обычной ночи |
 | `DAY_DURATION_SECONDS` | `180` | Длительность дневного обсуждения |

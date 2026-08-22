@@ -36,6 +36,15 @@ import type { RoleDisplayNames } from './domain/game/types.js';
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config);
+  logger.info(
+    {
+      minPlayers: config.minPlayers,
+      maxPlayers: config.maxPlayers,
+      configuredSizeCount: Object.keys(config.roleDistributions).length,
+      lobbyMaxPlayers: config.lobbyMaxPlayers,
+    },
+    '[config.loadConfig] Role table loaded',
+  );
   const prisma = createPrismaClient(config, logger);
   const gameRepository = new GameRepository(prisma, logger);
   const playerRepository = new PlayerRepository(prisma, logger);
@@ -44,7 +53,12 @@ async function main(): Promise<void> {
   const voteRepository = new VoteRepository(prisma, logger);
   const voteRoundRepository = new VoteRoundRepository(prisma, logger);
   const dayEffectRepository = new DayEffectRepository(prisma, logger);
-  const lobbyService = new LobbyService(gameRepository, playerRepository, logger, config.lobbyMaxPlayers);
+  const lobbyService = new LobbyService(gameRepository, playerRepository, logger, {
+    lobbyMaxPlayers: config.lobbyMaxPlayers,
+    minPlayers: config.minPlayers,
+    maxPlayers: config.maxPlayers,
+    roleDistributions: config.roleDistributions,
+  });
   const gameService = new GameService(gameRepository, playerRepository, lobbyService, config, logger);
   const nightResolutionService = new NightResolutionService(playerRepository, nightActionRepository, logger, dayEffectRepository);
   const votingService = new VotingService(gameRepository, playerRepository, voteRepository, logger, undefined, voteRoundRepository, dayEffectRepository);
