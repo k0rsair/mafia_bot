@@ -19,14 +19,15 @@ export class GameService {
     private readonly gameRepository: GameRepository,
     private readonly playerRepository: PlayerRepository,
     private readonly lobbyService: LobbyService,
-    private readonly config: Pick<AppConfig, 'roleConfirmationDurationSeconds'>,
+    private readonly config: Pick<AppConfig, 'roleConfirmationDurationSeconds' | 'roleDistributions'>,
     private readonly logger: AppLogger,
   ) {}
 
   public async startGame(gameId: string): Promise<Game> {
     this.logger.debug({ gameId }, '[GameService.startGame] Starting game');
     const lobby = await this.lobbyService.validateStart(gameId);
-    const assignments = assignRoles(lobby.players.map((player) => player.id));
+    this.logger.debug({ gameId, playerCount: lobby.players.length }, '[GameService.startGame] Assigning roles');
+    const assignments = assignRoles(lobby.players.map((player) => player.id), this.config.roleDistributions);
     const deadline = new Date(Date.now() + this.config.roleConfirmationDurationSeconds * 1000);
     const game = await this.gameRepository.startRoleConfirmation({
       gameId,

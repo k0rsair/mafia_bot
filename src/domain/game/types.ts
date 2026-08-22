@@ -57,6 +57,7 @@ export function getRoleLabel(role: Role, displayNames: RoleDisplayNames = DEFAUL
 }
 
 export type RoleDistribution = Readonly<Record<Role, number>>;
+export type RoleDistributions = Readonly<Record<number, RoleDistribution>>;
 
 export type RoleAssignment = Readonly<{
   playerId: string;

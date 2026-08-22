@@ -7,7 +7,7 @@ import { getRoleLabel, GameRuleError } from '../../../src/domain/game/types.js';
 describe('city Mafia role rules', () => {
   it.each([
     [6, { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 0, MANIAC: 0, CIVILIAN: 4 }],
-    [7, { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 0, MANIAC: 1, CIVILIAN: 4 }],
+    [7, { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 0, CIVILIAN: 4 }],
     [8, { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 4 }],
     [9, { MAFIA: 1, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 4 }],
     [10, { MAFIA: 1, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 5 }],
@@ -24,6 +24,21 @@ describe('city Mafia role rules', () => {
     expect(() => validateLobbySize(5)).toThrow(GameRuleError);
     expect(() => validateLobbySize(16)).toThrow(GameRuleError);
     expect(() => validateLobbySize(6)).not.toThrow();
+  });
+
+  it('uses an injected role table instead of the compiled default', () => {
+    const custom = {
+      4: { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 0, MANIAC: 0, CIVILIAN: 2 },
+      5: { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 0, MANIAC: 0, CIVILIAN: 3 },
+    };
+
+    expect(calculateRoleDistribution(4, custom)).toEqual(custom[4]);
+    expect(() => validateLobbySize(4, custom)).not.toThrow();
+    expect(() => validateLobbySize(6, custom)).toThrow(GameRuleError);
+    expect(assignRoles(['a', 'b', 'c', 'd'], custom).reduce<Record<string, number>>((counts, assignment) => {
+      counts[assignment.role] = (counts[assignment.role] ?? 0) + 1;
+      return counts;
+    }, {})).toEqual({ DON: 1, COMMISSIONER: 1, CIVILIAN: 2 });
   });
 
   it('assigns a six-player game without unused city roles', () => {
