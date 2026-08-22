@@ -222,7 +222,7 @@ export class NightActionService {
         return [];
       }
       const actor = playerById.get(action.actorPlayerId);
-      const target = playerById.get(action.targetPlayerId);
+      const target = action.targetPlayerId === null ? undefined : playerById.get(action.targetPlayerId);
       if (actor === undefined || target === undefined || actor.role !== 'MAFIA') {
         return [];
       }
@@ -367,6 +367,10 @@ function roleToActionType(role: Role): NightActionType {
       return 'DOCTOR_SAVE';
     case 'COMMISSIONER':
       return 'COMMISSIONER_CHECK';
+    case 'DON':
+    case 'PROSTITUTE':
+    case 'MANIAC':
+      throw new NightActionError('Для этой роли нужен обработчик городских ночных правил.');
     case 'CIVILIAN':
       throw new NightActionError('A civilian has no night action');
   }

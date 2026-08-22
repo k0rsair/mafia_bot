@@ -13,8 +13,9 @@ export class VoteRepository {
     phaseVersion: number;
     voterPlayerId: string;
     targetPlayerId: string | null;
+    voteRoundId?: string;
   }>): Promise<Vote> {
-    this.logger.debug({ gameId: input.gameId, phaseVersion: input.phaseVersion, isSkip: input.targetPlayerId === null }, '[VoteRepository.upsertVote] Saving vote');
+    this.logger.debug({ gameId: input.gameId, phaseVersion: input.phaseVersion, hasRound: input.voteRoundId !== undefined }, '[VoteRepository.upsertVote] Saving vote');
     const vote = await this.prisma.vote.upsert({
       where: {
         gameId_phaseVersion_voterPlayerId: {
@@ -29,10 +30,12 @@ export class VoteRepository {
         voterPlayerId: input.voterPlayerId,
         targetPlayerId: input.targetPlayerId,
         isSkip: input.targetPlayerId === null,
+        voteRoundId: input.voteRoundId ?? null,
       },
       update: {
         targetPlayerId: input.targetPlayerId,
         isSkip: input.targetPlayerId === null,
+        voteRoundId: input.voteRoundId ?? null,
       },
     });
     this.logger.info({ gameId: input.gameId, phaseVersion: input.phaseVersion }, '[VoteRepository.upsertVote] Vote accepted');
@@ -46,5 +49,15 @@ export class VoteRepository {
 
   public async countVotes(gameId: string, phaseVersion: number): Promise<number> {
     return this.prisma.vote.count({ where: { gameId, phaseVersion } });
+  }
+
+  public async listVotesForRound(gameId: string, voteRoundId: string): Promise<Vote[]> {
+    this.logger.debug({ gameId }, '[VoteRepository.listVotesForRound] Loading round votes');
+    return this.prisma.vote.findMany({ where: { gameId, voteRoundId } });
+  }
+
+  public async countVotesForRound(gameId: string, voteRoundId: string): Promise<number> {
+    this.logger.debug({ gameId }, '[VoteRepository.countVotesForRound] Counting round votes');
+    return this.prisma.vote.count({ where: { gameId, voteRoundId } });
   }
 }

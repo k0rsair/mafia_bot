@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   const votingService = new VotingService(gameRepository, playerRepository, voteRepository, logger);
   const gameFinalizationService = new GameFinalizationService(gameRepository, playerRepository, logger);
   const dayService = new DayService(playerRepository, voteRepository, logger);
-  const phaseService = new PhaseService(gameRepository, nightResolutionService, votingService, gameFinalizationService, config, logger);
+  const phaseService = new PhaseService(gameRepository, nightResolutionService, votingService, gameFinalizationService, config, logger, playerRepository);
   const testGameService = new TestGameService(lobbyService, gameService, playerRepository, nightActionRepository, votingService, phaseService, logger);
   const ephemeralAdapter = new TelegramEphemeralAdapter(config.botToken, logger);
   const nightActionService = new NightActionService(gameRepository, playerRepository, nightActionRepository, ephemeralAdapter, logger);
@@ -81,6 +81,18 @@ async function main(): Promise<void> {
     }
   };
   const publishNightStart = async (game: Game): Promise<void> => {
+    if (game.phase === 'NIGHT_PROSTITUTE') {
+      const controlMessage = await bot.api.sendMessage(
+        game.chatId,
+        '🌙 Ночная очередь началась. Сначала действует Шлюха; после её действия ночь продолжится автоматически.',
+      );
+      await gameRepository.setControlMessageId(game.id, controlMessage.message_id);
+      return;
+    }
+    if (game.phase !== 'NIGHT') {
+      logger.warn({ gameId: game.id, phase: game.phase, stateVersion: game.stateVersion }, '[publishNightStart] Ignored unexpected night-start phase');
+      return;
+    }
     const testCompletion = await testGameService.playVirtualNightActions(game);
     if (testCompletion !== null) {
       await publishVirtualNightCompletion(bot.api, testCompletion);
@@ -105,6 +117,20 @@ async function main(): Promise<void> {
       });
       await bot.api.sendMessage(result.game.chatId, text);
       await bot.api.sendMessage(result.game.chatId, renderDayDiscussion());
+    }
+    if (result.kind === 'NIGHT_STARTED') {
+      await publishNightStart(result.game);
+    }
+    if (result.kind === 'DAY_NOMINATION_STARTED') {
+      const controlMessage = await bot.api.sendMessage(result.game.chatId, '📣 Начался этап номинаций. Организатор закроет его отдельным городским контролом.');
+      await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+    }
+    if (result.kind === 'DAY_REVOTE_STARTED') {
+      const controlMessage = await bot.api.sendMessage(result.game.chatId, '🗳️ Время повторного голосования среди сохранённых кандидатов.');
+      await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+    }
+    if (result.kind === 'DAY_NOMINATION_EXPIRED' || result.kind === 'DAY_REVOTE_EXPIRED' || result.kind === 'DAY_FINAL_DECISION_EXPIRED') {
+      await bot.api.sendMessage(result.game.chatId, '⌛ Время городского подраунда истекло. Организатор может завершить его актуальным контролом.');
     }
     if (result.kind === 'DAY_VOTE_STARTED') {
       await testGameService.castVirtualVotes(result.game);
@@ -161,8 +187,11 @@ async function main(): Promise<void> {
         if (delivery.nightStarted && delivery.nightGame !== undefined) {
           await publishNightStart(delivery.nightGame);
         }
-      } else if (game.phase === 'NIGHT') {
+      } else if (game.phase === 'NIGHT_PROSTITUTE' || game.phase === 'NIGHT') {
         await publishNightStart(game);
+      } else if (game.phase === 'DAY_NOMINATION') {
+        const message = await bot.api.sendMessage(game.chatId, '📣 Игра восстановлена на этапе номинаций. Используйте текущий городской контроль.');
+        await gameRepository.setControlMessageId(game.id, message.message_id);
       } else if (game.phase === 'DAY_VOTE') {
         await testGameService.castVirtualVotes(game);
         const view = await dayService.renderVote(game);
@@ -170,6 +199,9 @@ async function main(): Promise<void> {
         await gameRepository.setControlMessageId(game.id, message.message_id);
       } else if (game.phase === 'DAY_DISCUSSION') {
         const message = await bot.api.sendMessage(game.chatId, '☀️ Игра восстановлена. Обсуждение продолжается до сохранённого дедлайна.');
+        await gameRepository.setControlMessageId(game.id, message.message_id);
+      } else if (game.phase === 'DAY_TIE_DISCUSSION' || game.phase === 'DAY_REVOTE' || game.phase === 'DAY_FINAL_DECISION') {
+        const message = await bot.api.sendMessage(game.chatId, '🗳️ Игра восстановлена на городском подраунде. Используйте актуальный контроль и сохранённый дедлайн.');
         await gameRepository.setControlMessageId(game.id, message.message_id);
       }
     }

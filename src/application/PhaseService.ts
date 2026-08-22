@@ -3,17 +3,24 @@ import type { Game, PhaseJob } from '@prisma/client';
 import type { AppConfig } from '../config/env.js';
 import type { AppLogger } from '../observability/logger.js';
 import type { GameRepository } from '../infrastructure/repositories/GameRepository.js';
+import type { PlayerRepository } from '../infrastructure/repositories/PlayerRepository.js';
 import type { AppliedNightResolution, NightResolutionService } from './NightResolutionService.js';
 import type { AppliedVoteResolution, VotingService } from './VotingService.js';
 import type { FinalizedGame, GameFinalizationService } from './GameFinalizationService.js';
 
+type PhaseDurations = Pick<AppConfig, 'roleConfirmationDurationSeconds' | 'nightDurationSeconds' | 'dayDurationSeconds' | 'voteDurationSeconds'>
+  & Readonly<Partial<Pick<AppConfig, 'tieDiscussionDurationSeconds'>>>;
+
 export type PhaseDeadlineResult = Readonly<{
   game: Game;
-  kind: 'ROLE_CONFIRMATION_EXPIRED' | 'UNHANDLED_PHASE';
+  kind: 'ROLE_CONFIRMATION_EXPIRED' | 'DAY_NOMINATION_EXPIRED' | 'DAY_REVOTE_EXPIRED' | 'DAY_FINAL_DECISION_EXPIRED' | 'UNHANDLED_PHASE';
 }> | Readonly<{
   game: Game;
   kind: 'NIGHT_RESOLVED';
   resolution: AppliedNightResolution;
+}> | Readonly<{
+  game: Game;
+  kind: 'NIGHT_STARTED' | 'DAY_NOMINATION_STARTED' | 'DAY_REVOTE_STARTED';
 }> | Readonly<{
   game: Game;
   kind: 'DAY_VOTE_STARTED';
@@ -35,21 +42,13 @@ export class PhaseService {
     private readonly nightResolutionService: NightResolutionService,
     private readonly votingService: VotingService,
     private readonly gameFinalizationService: GameFinalizationService,
-    private readonly config: Pick<AppConfig, 'roleConfirmationDurationSeconds' | 'nightDurationSeconds' | 'dayDurationSeconds' | 'voteDurationSeconds'>,
+    private readonly config: PhaseDurations,
     private readonly logger: AppLogger,
+    private readonly playerRepository?: PlayerRepository,
   ) {}
 
   public async startNight(game: Game): Promise<Game | null> {
-    const deadline = new Date(Date.now() + this.config.nightDurationSeconds * 1000);
-    this.logger.debug({ gameId: game.id, stateVersion: game.stateVersion, deadline }, '[PhaseService.startNight] Starting night after role confirmations');
-    return this.gameRepository.transitionPhase({
-      gameId: game.id,
-      currentPhase: 'ROLE_CONFIRMATION',
-      currentVersion: game.stateVersion,
-      nextPhase: 'NIGHT',
-      nextStatus: 'RUNNING',
-      deadline,
-    });
+    return this.startCityNight(game, 'ROLE_CONFIRMATION');
   }
 
   public async extendRoleConfirmation(game: Game): Promise<Game | null> {
@@ -69,7 +68,32 @@ export class PhaseService {
   }
 
   public async startDayVote(game: Game): Promise<Game | null> {
-    return this.transitionToDayVote(game, 'manual');
+    return this.startDayNomination(game, 'manual');
+  }
+
+  public async startPrimaryVote(game: Game): Promise<Game | null> {
+    return this.transitionDayPhase(game, 'DAY_NOMINATION', 'DAY_VOTE', this.config.voteDurationSeconds, 'primary vote');
+  }
+
+  public async startTieDiscussion(game: Game): Promise<Game | null> {
+    return this.transitionDayPhase(game, 'DAY_VOTE', 'DAY_TIE_DISCUSSION', this.config.tieDiscussionDurationSeconds ?? 30, 'tie discussion');
+  }
+
+  public async startDayRevote(game: Game): Promise<Game | null> {
+    return this.transitionDayPhase(game, 'DAY_TIE_DISCUSSION', 'DAY_REVOTE', this.config.voteDurationSeconds, 'revote');
+  }
+
+  public async startFinalDecision(game: Game): Promise<Game | null> {
+    return this.transitionDayPhase(game, 'DAY_REVOTE', 'DAY_FINAL_DECISION', this.config.voteDurationSeconds, 'final decision');
+  }
+
+  public async completeProstituteNight(gameId: string, phaseVersion: number): Promise<Game | null> {
+    const game = await this.gameRepository.findById(gameId);
+    if (game === null || game.phase !== 'NIGHT_PROSTITUTE' || game.stateVersion !== phaseVersion) {
+      this.logger.warn({ gameId, phaseVersion }, '[PhaseService.completeProstituteNight] Ignored stale prostitute-night completion');
+      return null;
+    }
+    return this.startRegularNight(game);
   }
 
   public async recordControlMessage(gameId: string, messageId: number): Promise<void> {
@@ -110,17 +134,42 @@ export class PhaseService {
       return { game, kind: 'ROLE_CONFIRMATION_EXPIRED' };
     }
 
+    if (game.phase === 'NIGHT_PROSTITUTE') {
+      const nextGame = await this.startRegularNight(game);
+      return nextGame === null ? null : { game: nextGame, kind: 'NIGHT_STARTED' };
+    }
+
     if (game.phase === 'NIGHT') {
       return this.resolveNightAndStartDay(game, 'deadline');
     }
 
     if (game.phase === 'DAY_DISCUSSION') {
-      const nextGame = await this.transitionToDayVote(game, 'deadline');
-      return nextGame === null ? null : { game: nextGame, kind: 'DAY_VOTE_STARTED' };
+      const nextGame = await this.startDayNomination(game, 'deadline');
+      return nextGame === null ? null : { game: nextGame, kind: 'DAY_NOMINATION_STARTED' };
+    }
+
+    if (game.phase === 'DAY_NOMINATION') {
+      this.logger.warn({ gameId: game.id, phase: game.phase, stateVersion: game.stateVersion }, '[PhaseService.processExpiredJob] Nomination deadline requires city vote closure');
+      return { game, kind: 'DAY_NOMINATION_EXPIRED' };
+    }
+
+    if (game.phase === 'DAY_TIE_DISCUSSION') {
+      const nextGame = await this.startDayRevote(game);
+      return nextGame === null ? null : { game: nextGame, kind: 'DAY_REVOTE_STARTED' };
     }
 
     if (game.phase === 'DAY_VOTE') {
       return this.closeDayVote(game);
+    }
+
+    if (game.phase === 'DAY_REVOTE') {
+      this.logger.warn({ gameId: game.id, phase: game.phase, stateVersion: game.stateVersion }, '[PhaseService.processExpiredJob] Revote deadline requires city vote closure');
+      return { game, kind: 'DAY_REVOTE_EXPIRED' };
+    }
+
+    if (game.phase === 'DAY_FINAL_DECISION') {
+      this.logger.warn({ gameId: game.id, phase: game.phase, stateVersion: game.stateVersion }, '[PhaseService.processExpiredJob] Final-decision deadline requires city vote closure');
+      return { game, kind: 'DAY_FINAL_DECISION_EXPIRED' };
     }
 
     this.logger.warn({ gameId: game.id, phase: game.phase }, '[PhaseService.processExpiredJob] No deadline handler for phase yet');
@@ -137,14 +186,7 @@ export class PhaseService {
     if (finalization !== null) {
       return { game: finalization.game, kind: 'GAME_FINISHED', finalization, voteResolution: resolution };
     }
-    const nextGame = await this.gameRepository.transitionPhase({
-      gameId: game.id,
-      currentPhase: 'DAY_VOTE',
-      currentVersion: game.stateVersion,
-      nextPhase: 'NIGHT',
-      nextStatus: 'RUNNING',
-      deadline: new Date(Date.now() + this.config.nightDurationSeconds * 1000),
-    });
+    const nextGame = await this.startCityNight(game, 'DAY_VOTE');
     if (nextGame === null) {
       return null;
     }
@@ -178,7 +220,7 @@ export class PhaseService {
     return { game: nextGame, kind: 'NIGHT_RESOLVED', resolution };
   }
 
-  private async transitionToDayVote(game: Game, trigger: 'manual' | 'deadline'): Promise<Game | null> {
+  private async startDayNomination(game: Game, trigger: 'manual' | 'deadline'): Promise<Game | null> {
     if (game.phase !== 'DAY_DISCUSSION') {
       return null;
     }
@@ -187,15 +229,83 @@ export class PhaseService {
       gameId: game.id,
       currentPhase: 'DAY_DISCUSSION',
       currentVersion: game.stateVersion,
-      nextPhase: 'DAY_VOTE',
+      nextPhase: 'DAY_NOMINATION',
       nextStatus: 'RUNNING',
       deadline: new Date(Date.now() + this.config.voteDurationSeconds * 1000),
     });
     if (nextGame !== null) {
       this.logger.info(
         { gameId: nextGame.id, phase: nextGame.phase, trigger },
-        '[FIX:manual-vote-start] Day vote started',
+        '[PhaseService.startDayNomination] Day nomination started',
       );
+    }
+    return nextGame;
+  }
+
+  private async startCityNight(game: Game, currentPhase: 'ROLE_CONFIRMATION' | 'DAY_VOTE'): Promise<Game | null> {
+    const deadline = new Date(Date.now() + this.config.nightDurationSeconds * 1000);
+    this.logger.debug({ gameId: game.id, phase: currentPhase, stateVersion: game.stateVersion, deadline }, '[PhaseService.startCityNight] Starting prostitute-first night');
+    const prostituteNight = await this.gameRepository.transitionPhase({
+      gameId: game.id,
+      currentPhase,
+      currentVersion: game.stateVersion,
+      nextPhase: 'NIGHT_PROSTITUTE',
+      nextStatus: 'RUNNING',
+      deadline,
+    });
+    if (prostituteNight === null) {
+      return null;
+    }
+
+    const hasLivingProstitute = this.playerRepository === undefined
+      ? false
+      : (await this.playerRepository.listAlivePlayers(prostituteNight.id)).some((player) => player.role === 'PROSTITUTE');
+    if (hasLivingProstitute) {
+      this.logger.info({ gameId: prostituteNight.id, phase: prostituteNight.phase, stateVersion: prostituteNight.stateVersion }, '[PhaseService.startCityNight] Prostitute-night stage started');
+      return prostituteNight;
+    }
+    return this.startRegularNight(prostituteNight);
+  }
+
+  private async startRegularNight(game: Game): Promise<Game | null> {
+    if (game.phase !== 'NIGHT_PROSTITUTE') {
+      return null;
+    }
+    const deadline = new Date(Date.now() + this.config.nightDurationSeconds * 1000);
+    const nextGame = await this.gameRepository.transitionPhase({
+      gameId: game.id,
+      currentPhase: 'NIGHT_PROSTITUTE',
+      currentVersion: game.stateVersion,
+      nextPhase: 'NIGHT',
+      nextStatus: 'RUNNING',
+      deadline,
+    });
+    if (nextGame !== null) {
+      this.logger.info({ gameId: nextGame.id, phase: nextGame.phase, stateVersion: nextGame.stateVersion }, '[PhaseService.startRegularNight] Regular night started');
+    }
+    return nextGame;
+  }
+
+  private async transitionDayPhase(
+    game: Game,
+    currentPhase: 'DAY_NOMINATION' | 'DAY_VOTE' | 'DAY_TIE_DISCUSSION' | 'DAY_REVOTE',
+    nextPhase: 'DAY_VOTE' | 'DAY_TIE_DISCUSSION' | 'DAY_REVOTE' | 'DAY_FINAL_DECISION',
+    durationSeconds: number,
+    transition: string,
+  ): Promise<Game | null> {
+    if (game.phase !== currentPhase) {
+      return null;
+    }
+    const nextGame = await this.gameRepository.transitionPhase({
+      gameId: game.id,
+      currentPhase,
+      currentVersion: game.stateVersion,
+      nextPhase,
+      nextStatus: 'RUNNING',
+      deadline: new Date(Date.now() + durationSeconds * 1000),
+    });
+    if (nextGame !== null) {
+      this.logger.info({ gameId: nextGame.id, phase: nextGame.phase, stateVersion: nextGame.stateVersion, transition }, '[PhaseService.transitionDayPhase] Day phase transitioned');
     }
     return nextGame;
   }

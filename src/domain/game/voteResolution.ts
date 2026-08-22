@@ -3,14 +3,16 @@ export type RecordedVote = Readonly<{
   isSkip: boolean;
 }>;
 
-export type VoteResolution = Readonly<{
+import type { PublicVoteOutcome } from './types.js';
+
+export type VoteResolution = PublicVoteOutcome & Readonly<{
   eliminatedPlayerId: string | null;
   outcome: 'ELIMINATION' | 'SKIP' | 'TIE' | 'NO_VOTES';
 }>;
 
 export function resolveVote(votes: readonly RecordedVote[]): VoteResolution {
   if (votes.length === 0) {
-    return { eliminatedPlayerId: null, outcome: 'NO_VOTES' };
+    return { eliminatedPlayerIds: [], eliminatedPlayerId: null, outcome: 'NO_VOTES' };
   }
 
   const counts = new Map<string, number>();
@@ -24,13 +26,13 @@ export function resolveVote(votes: readonly RecordedVote[]): VoteResolution {
   const topCount = Math.max(...counts.values());
   const winners = [...counts.entries()].filter(([, count]) => count === topCount).map(([candidate]) => candidate);
   if (winners.length !== 1) {
-    return { eliminatedPlayerId: null, outcome: 'TIE' };
+    return { eliminatedPlayerIds: [], eliminatedPlayerId: null, outcome: 'TIE' };
   }
 
   const winner = winners[0];
   if (winner === undefined || winner === 'skip') {
-    return { eliminatedPlayerId: null, outcome: 'SKIP' };
+    return { eliminatedPlayerIds: [], eliminatedPlayerId: null, outcome: 'SKIP' };
   }
 
-  return { eliminatedPlayerId: winner, outcome: 'ELIMINATION' };
+  return { eliminatedPlayerIds: [winner], eliminatedPlayerId: winner, outcome: 'ELIMINATION' };
 }
