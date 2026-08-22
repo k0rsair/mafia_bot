@@ -133,11 +133,15 @@ export class LobbyService {
     try {
       validateLobbySize(snapshot.players.length);
     } catch (error) {
+      this.logger.warn(
+        { gameId, playerCount: snapshot.players.length },
+        '[FIX:lobby-min-players] Rejected start outside supported lobby size',
+      );
       const message = error instanceof GameRuleError ? error.message : 'Не удалось проверить состав лобби.';
       throw new LobbyError(message);
     }
 
-    this.logger.info({ gameId, playerCount: snapshot.players.length }, '[LobbyService.validateStart] Lobby is ready to start');
+    this.logger.info({ gameId, playerCount: snapshot.players.length }, '[FIX:lobby-min-players] Lobby is ready to start');
     return snapshot;
   }
 }
