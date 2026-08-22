@@ -2,8 +2,8 @@ import type { Game } from '@prisma/client';
 import type { Bot, Context } from 'grammy';
 import { describe, expect, it, vi } from 'vitest';
 
-import { registerVoteCallbacks } from '../../../src/bot/callbacks/voteCallbacks.js';
-import { encodeVoteCallback } from '../../../src/bot/callbacks/callbackData.js';
+import { publishVoteClosure, registerVoteCallbacks } from '../../../src/bot/callbacks/voteCallbacks.js';
+import { encodeVoteCallback, encodeVoteConfirmationCallback } from '../../../src/bot/callbacks/callbackData.js';
 import { createLogger } from '../../../src/observability/logger.js';
 
 type CallbackHandler = (context: Context) => Promise<unknown>;
@@ -13,7 +13,7 @@ describe('day vote callbacks', () => {
     const handlers: CallbackHandler[] = [];
     const voteGame = { id: 'game-1', chatId: '-1001', phase: 'DAY_VOTE', stateVersion: 7 } as Game;
     const nightGame = { ...voteGame, phase: 'NIGHT', stateVersion: 8 } as Game;
-    const castVote = vi.fn().mockResolvedValue({ game: voteGame, votesCast: 3, votersTotal: 3, allVoted: true });
+    const confirmVote = vi.fn().mockResolvedValue({ game: voteGame, votesCast: 3, votersTotal: 3, allVoted: true });
     const closeDayVote = vi.fn().mockResolvedValue({
       kind: 'DAY_VOTE_RESOLVED',
       game: nightGame,
@@ -39,7 +39,7 @@ describe('day vote callbacks', () => {
 
     registerVoteCallbacks(
       bot,
-      { castVote } as never,
+      { confirmVote } as never,
       { renderVote: vi.fn().mockResolvedValue({ text: '🗳️ Дневное голосование', replyMarkup: { inline_keyboard: [[{ text: 'Игрок 2', callback_data: 'v:game-1:7:0' }]] } }) } as never,
       { closeDayVote, recordControlMessage, getCurrentGame: vi.fn().mockResolvedValue(nightGame) } as never,
       { deliverNightPanels } as never,
@@ -52,7 +52,7 @@ describe('day vote callbacks', () => {
       throw new Error('Vote callback handler was not registered');
     }
     const context = {
-      callbackQuery: { data: encodeVoteCallback(voteGame.id, voteGame.stateVersion, 0), id: 'query-1' },
+      callbackQuery: { data: encodeVoteConfirmationCallback(voteGame.id, voteGame.stateVersion), id: 'query-1' },
       chat: { id: -1001, type: 'supergroup' },
       from: { id: 101 },
       editMessageText,
@@ -74,10 +74,114 @@ describe('day vote callbacks', () => {
       expect.stringContaining('Игрок 3 → пропуск'),
       { reply_markup: { inline_keyboard: [] } },
     );
-    expect(answerCallbackQuery).toHaveBeenCalledWith({ text: '✅ Голос принят.' });
+    expect(confirmVote).toHaveBeenCalledWith({
+      gameId: voteGame.id,
+      phaseVersion: voteGame.stateVersion,
+      chatId: voteGame.chatId,
+      userId: '101',
+    });
+    expect(answerCallbackQuery).toHaveBeenCalledWith({ text: '✅ Выбор подтверждён.' });
     expect(reply).toHaveBeenCalledTimes(1);
     expect(reply).toHaveBeenCalledWith(expect.stringContaining('Ночь наступила'), expect.any(Object));
     expect(recordControlMessage).toHaveBeenCalledWith(nightGame.id, 42);
     expect(deliverNightPanels).toHaveBeenCalledWith(nightGame);
+  });
+
+  it('saves a choice as a draft until the player presses confirmation', async () => {
+    const handlers: CallbackHandler[] = [];
+    const voteGame = { id: 'game-1', chatId: '-1001', phase: 'DAY_NOMINATION', stateVersion: 7 } as Game;
+    const castVote = vi.fn().mockResolvedValue({ game: voteGame, votesCast: 0, votersTotal: 3, allVoted: false });
+    const confirmVote = vi.fn();
+    const renderVote = vi.fn().mockResolvedValue({ text: '📣 Номинации\nПодтверждено: 0/3', replyMarkup: { inline_keyboard: [] } });
+    const bot = {
+      callbackQuery: vi.fn((_query: RegExp, handler: CallbackHandler) => handlers.push(handler)),
+    } as unknown as Bot<Context>;
+    const editMessageText = vi.fn().mockResolvedValue(true);
+    const answerCallbackQuery = vi.fn().mockResolvedValue(true);
+
+    registerVoteCallbacks(
+      bot,
+      { castVote, confirmVote } as never,
+      { renderVote } as never,
+      { getCurrentGame: vi.fn().mockResolvedValue(voteGame), closeDayVote: vi.fn() } as never,
+      {} as never,
+      {} as never,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    const handler = handlers[0];
+    if (handler === undefined) throw new Error('Vote handler was not registered');
+    await handler({
+      callbackQuery: { data: encodeVoteCallback(voteGame.id, voteGame.stateVersion, 0), id: 'query-1' },
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 101 },
+      editMessageText,
+      answerCallbackQuery,
+    } as unknown as Context);
+
+    expect(castVote).toHaveBeenCalledWith(expect.objectContaining({ action: 'candidate', targetIndex: 0 }));
+    expect(confirmVote).not.toHaveBeenCalled();
+    expect(editMessageText).toHaveBeenCalledWith('📣 Номинации\nПодтверждено: 0/3', { reply_markup: { inline_keyboard: [] } });
+    expect(answerCallbackQuery).toHaveBeenCalledWith({ text: '📝 Выбор сохранён. Подтвердите его отдельной кнопкой.' });
+  });
+
+  it('does not reopen a vote control when another final confirmation has already closed it', async () => {
+    const handlers: CallbackHandler[] = [];
+    const voteGame = { id: 'game-1', chatId: '-1001', phase: 'DAY_FINAL_DECISION', stateVersion: 7 } as Game;
+    const nextGame = { ...voteGame, phase: 'NIGHT', stateVersion: 8 } as Game;
+    const bot = {
+      callbackQuery: vi.fn((_query: RegExp, handler: CallbackHandler) => handlers.push(handler)),
+    } as unknown as Bot<Context>;
+    const editMessageText = vi.fn();
+    const answerCallbackQuery = vi.fn().mockResolvedValue(true);
+
+    registerVoteCallbacks(
+      bot,
+      { confirmVote: vi.fn().mockResolvedValue({ game: voteGame, votesCast: 3, votersTotal: 3, allVoted: true }) } as never,
+      { renderVote: vi.fn().mockResolvedValue({ text: '⚖️ Финальное решение', replyMarkup: { inline_keyboard: [[{ text: '✅ Подтвердить', callback_data: 'v:game-1:7:confirm' }]] } }) } as never,
+      { closeDayVote: vi.fn().mockResolvedValue(null), getCurrentGame: vi.fn().mockResolvedValue(nextGame) } as never,
+      {} as never,
+      {} as never,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    const handler = handlers[0];
+    if (handler === undefined) throw new Error('Vote handler was not registered');
+    await handler({
+      callbackQuery: { data: encodeVoteConfirmationCallback(voteGame.id, voteGame.stateVersion), id: 'query-1' },
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 101 },
+      editMessageText,
+      answerCallbackQuery,
+    } as unknown as Context);
+
+    expect(editMessageText).not.toHaveBeenCalled();
+    expect(answerCallbackQuery).toHaveBeenCalledWith({ text: '✅ Выбор подтверждён.' });
+  });
+
+  it('publishes the primary vote after a command closes nominations', async () => {
+    const nominationGame = { id: 'game-1', chatId: '-1001', phase: 'DAY_NOMINATION', stateVersion: 7, controlMessageId: 41 } as Game;
+    const primaryGame = { ...nominationGame, phase: 'DAY_VOTE', stateVersion: 8 } as Game;
+    const editMessageText = vi.fn().mockResolvedValue(true);
+    const reply = vi.fn().mockResolvedValue({ message_id: 42 });
+    const recordControlMessage = vi.fn().mockResolvedValue(undefined);
+
+    await publishVoteClosure(
+      { api: { editMessageText }, reply } as unknown as Context,
+      { kind: 'DAY_VOTE_STARTED', game: primaryGame },
+      { renderVote: vi.fn().mockResolvedValue({ text: '🗳️ Основное голосование', replyMarkup: { inline_keyboard: [] } }) } as never,
+      { getCurrentGame: vi.fn().mockResolvedValue(primaryGame), recordControlMessage } as never,
+      {} as never,
+      {} as never,
+    );
+
+    expect(editMessageText).toHaveBeenCalledWith(
+      nominationGame.chatId,
+      nominationGame.controlMessageId,
+      '📣 Номинации завершены. Начинается основное голосование.',
+      { reply_markup: { inline_keyboard: [] } },
+    );
+    expect(reply).toHaveBeenCalledWith('🗳️ Основное голосование', { reply_markup: { inline_keyboard: [] } });
+    expect(recordControlMessage).toHaveBeenCalledWith(primaryGame.id, 42);
   });
 });

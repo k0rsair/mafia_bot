@@ -82,5 +82,6 @@ describe('city vote resolution and victory', () => {
     expect(getWinningFaction([{ id: 'p1', role: 'CIVILIAN' }, { id: 'p2', role: 'DOCTOR' }])).toBe('PEACEFUL');
     expect(getWinningFaction([{ id: 'x', role: 'MANIAC' }, { id: 'p1', role: 'CIVILIAN' }])).toBe('MANIAC');
     expect(getWinningFaction([{ id: 'x', role: 'MANIAC' }, { id: 's', role: 'COMMISSIONER' }])).toBeNull();
+    expect(getWinningFaction([{ id: 'x', role: 'MANIAC' }])).toBe('MANIAC');
   });
 });

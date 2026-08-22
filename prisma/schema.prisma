@@ -137,6 +137,7 @@ model Vote {
   targetPlayerId String?
   voteRoundId    String?
   isSkip         Boolean    @default(false)
+  confirmedAt    DateTime?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   game           Game       @relation(fields: [gameId], references: [id], onDelete: Cascade)

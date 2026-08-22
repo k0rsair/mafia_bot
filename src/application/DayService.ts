@@ -62,10 +62,11 @@ export class DayService {
     if (round === null) {
       return null;
     }
-    const [players, votes] = await Promise.all([
+    const [players, storedVotes] = await Promise.all([
       this.playerRepository.listAlivePlayers(game.id),
       this.voteRepository.listVotesForRound(game.id, round.id),
     ]);
+    const votes = storedVotes.filter((vote) => vote.confirmedAt !== null);
     const playersById = new Map(players.map((player) => [player.id, player]));
     const candidates = round.candidatePlayerIds.flatMap((playerId) => {
       const player = playersById.get(playerId);
@@ -92,10 +93,11 @@ export class DayService {
       });
     }
 
-    const [players, votes] = await Promise.all([
+    const [players, storedVotes] = await Promise.all([
       this.playerRepository.listAlivePlayers(game.id),
       this.voteRepository.listVotes(game.id, game.stateVersion),
     ]);
+    const votes = storedVotes.filter((vote) => vote.confirmedAt !== null);
     this.logger.debug({ gameId: game.id, phaseVersion: game.stateVersion, candidateCount: players.length, votesCast: votes.length, votersTotal: players.length }, '[DayService.renderVote] Rendering legacy vote');
     return renderVoteView({
       gameId: game.id,

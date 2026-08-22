@@ -78,28 +78,46 @@ export class VotingService {
       ...(activeRound === null ? {} : { voteRoundId: activeRound.id }),
       isSkip,
     });
-    const [votesCast, alivePlayers] = await Promise.all([
-      activeRound === null
-        ? this.voteRepository.countVotes(game.id, game.stateVersion)
-        : this.voteRepository.countVotesForRound(game.id, activeRound.id),
-      this.playerRepository.listAlivePlayers(game.id),
-    ]);
-
-    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion, votesCast, votersTotal: alivePlayers.length, ...(activeRound === null ? {} : { roundKind: activeRound.kind }) }, '[VotingService.castVote] Vote progress updated');
-    return { game, votesCast, votersTotal: alivePlayers.length, allVoted: votesCast === alivePlayers.length, ...(activeRound === null ? {} : { roundKind: activeRound.kind as VoteRoundKind }) };
+    const progress = await this.getConfirmedVoteProgress(game, activeRound);
+    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion, confirmedVotes: progress.votesCast, votersTotal: progress.votersTotal, ...(activeRound === null ? {} : { roundKind: activeRound.kind }) }, '[FIX:confirmed-city-vote] City vote draft saved');
+    return progress;
   }
 
-  public async resolveVote(gameId: string, phaseVersion: number): Promise<ResolvedVoteRound> {
+  public async confirmVote(input: Readonly<{
+    gameId: string;
+    phaseVersion: number;
+    chatId: string;
+    userId: string;
+  }>): Promise<VoteProgress> {
+    const { game, voter } = await this.getVotePlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
+    const activeRound = await this.getActiveVoteRound(game.id, game.stateVersion);
+    const confirmed = await this.voteRepository.confirmVote({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      voterPlayerId: voter.id,
+      ...(activeRound === null ? {} : { voteRoundId: activeRound.id }),
+    });
+    if (!confirmed) {
+      throw new VotingError('Сначала выберите вариант. Подтверждённый голос нужно сначала изменить, чтобы подтвердить снова.');
+    }
+
+    const progress = await this.getConfirmedVoteProgress(game, activeRound);
+    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion, confirmedVotes: progress.votesCast, votersTotal: progress.votersTotal, allConfirmed: progress.allVoted, ...(activeRound === null ? {} : { roundKind: activeRound.kind }) }, '[FIX:confirmed-city-vote] City vote confirmed');
+    return progress;
+  }
+
+  public async resolveVote(gameId: string, phaseVersion: number, expectedRound?: VoteRound | null): Promise<ResolvedVoteRound> {
     this.logger.debug({ gameId, phaseVersion }, '[VotingService.resolveVote] Resolving city vote round');
-    const activeRound = this.voteRoundRepository === undefined
-      ? null
-      : await this.voteRoundRepository.findOpenRound(gameId, phaseVersion);
-    const [votes, alivePlayers] = await Promise.all([
+    const activeRound = expectedRound === undefined
+      ? await this.getActiveVoteRound(gameId, phaseVersion)
+      : expectedRound;
+    const [storedVotes, alivePlayers] = await Promise.all([
       activeRound === null
         ? this.voteRepository.listVotes(gameId, phaseVersion)
         : this.voteRepository.listVotesForRound(gameId, activeRound.id),
       this.playerRepository.listAlivePlayers(gameId),
     ]);
+    const votes = storedVotes.filter((vote) => vote.confirmedAt !== null);
     if (activeRound?.kind === 'NOMINATION') {
       throw new VotingError('Номинации закрываются отдельным городским контролом.');
     }
@@ -116,15 +134,14 @@ export class VotingService {
     return { round: activeRound, resolution: orderedResolution, voteDetails };
   }
 
-  public async getNominatedCandidateIds(gameId: string, phaseVersion: number): Promise<readonly string[]> {
-    if (this.voteRoundRepository === undefined) {
-      return [];
-    }
-    const round = await this.voteRoundRepository.findOpenRound(gameId, phaseVersion);
+  public async getNominatedCandidateIds(gameId: string, phaseVersion: number, expectedRound?: VoteRound | null): Promise<readonly string[]> {
+    const round = expectedRound === undefined
+      ? await this.getActiveVoteRound(gameId, phaseVersion)
+      : expectedRound;
     if (round === null || round.kind !== 'NOMINATION') {
       throw new VotingError('Раунд номинаций уже закрыт или устарел.');
     }
-    const votes = await this.voteRepository.listVotesForRound(gameId, round.id);
+    const votes = (await this.voteRepository.listVotesForRound(gameId, round.id)).filter((vote) => vote.confirmedAt !== null);
     const nominatedIds = new Set(votes.flatMap((vote) => vote.targetPlayerId === null ? [] : [vote.targetPlayerId]));
     const candidates = round.candidatePlayerIds.filter((playerId) => nominatedIds.has(playerId));
     this.logger.info({ gameId, phaseVersion, nominatedCandidateCount: candidates.length }, '[VotingService.getNominatedCandidateIds] Nominations summarized');
@@ -132,10 +149,7 @@ export class VotingService {
   }
 
   public async getVoteRoundOptions(gameId: string, phaseVersion: number): Promise<VoteRoundOptions> {
-    if (this.voteRoundRepository === undefined) {
-      return { kind: null, candidatePlayerIds: [] };
-    }
-    const round = await this.voteRoundRepository.findOpenRound(gameId, phaseVersion);
+    const round = await this.getActiveVoteRound(gameId, phaseVersion);
     return round === null
       ? { kind: null, candidatePlayerIds: [] }
       : { kind: round.kind as VoteRoundKind, candidatePlayerIds: round.candidatePlayerIds };
@@ -149,7 +163,7 @@ export class VotingService {
     if (round === null) {
       return [];
     }
-    const votes = await this.voteRepository.listVotesForRound(gameId, round.id);
+    const votes = (await this.voteRepository.listVotesForRound(gameId, round.id)).filter((vote) => vote.confirmedAt !== null);
     const resolution = resolveVote(votes);
     return round.candidatePlayerIds.filter((playerId) => resolution.tiedPlayerIds.includes(playerId));
   }
@@ -184,11 +198,18 @@ export class VotingService {
     };
   }
 
-  public async closeCurrentRound(gameId: string, phaseVersion: number, round: VoteRound | null): Promise<void> {
-    if (round === null || this.voteRoundRepository === undefined) {
-      return;
+  public async getActiveVoteRound(gameId: string, phaseVersion: number): Promise<VoteRound | null> {
+    if (this.voteRoundRepository === undefined) {
+      return null;
     }
-    await this.voteRoundRepository.closeRound({ gameId, phaseVersion, sequence: round.sequence });
+    return this.voteRoundRepository.findOpenRound(gameId, phaseVersion);
+  }
+
+  public async closeCurrentRound(gameId: string, phaseVersion: number, round: VoteRound | null): Promise<boolean> {
+    if (round === null || this.voteRoundRepository === undefined) {
+      return true;
+    }
+    return this.voteRoundRepository.closeRound({ gameId, phaseVersion, sequence: round.sequence });
   }
 
   public async expireDayEffects(gameId: string): Promise<void> {
@@ -254,6 +275,22 @@ export class VotingService {
     }
 
     return { game, voter };
+  }
+
+  private async getConfirmedVoteProgress(game: Game, activeRound: VoteRound | null): Promise<VoteProgress> {
+    const [votesCast, alivePlayers] = await Promise.all([
+      activeRound === null
+        ? this.voteRepository.countConfirmedVotes(game.id, game.stateVersion)
+        : this.voteRepository.countConfirmedVotesForRound(game.id, activeRound.id),
+      this.playerRepository.listAlivePlayers(game.id),
+    ]);
+    return {
+      game,
+      votesCast,
+      votersTotal: alivePlayers.length,
+      allVoted: votesCast === alivePlayers.length,
+      ...(activeRound === null ? {} : { roundKind: activeRound.kind as VoteRoundKind }),
+    };
   }
 }
 

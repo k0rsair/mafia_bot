@@ -16,8 +16,8 @@ describe('DayService', () => {
       { listAlivePlayers: async () => [alice, boris, vera] } as unknown as PlayerRepository,
       {
         listVotes: async () => [
-          { voterPlayerId: alice.id, targetPlayerId: boris.id },
-          { voterPlayerId: vera.id, targetPlayerId: null },
+          { voterPlayerId: alice.id, targetPlayerId: boris.id, confirmedAt: new Date() },
+          { voterPlayerId: vera.id, targetPlayerId: null, confirmedAt: new Date() },
         ],
       } as unknown as VoteRepository,
       createLogger({ logLevel: 'silent' }),
@@ -25,7 +25,7 @@ describe('DayService', () => {
 
     const view = await service.renderVote(game);
 
-    expect(view.text).toContain('Голоса: 2/3');
+    expect(view.text).toContain('Подтверждено: 2/3');
     expect(view.text).toContain('Кто за кого:');
     expect(view.text).toContain('Алиса → Борис');
     expect(view.text).toContain('Вера → пропуск');
