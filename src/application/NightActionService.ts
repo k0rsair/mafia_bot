@@ -180,6 +180,8 @@ export class NightActionService {
       await this.sendInvestigationResult(input, renderCommissionerResult(target.displayName, isMafiaVisibleToSheriff(target.role as Role)));
     } else if (actionType === 'DON_CHECK') {
       await this.sendInvestigationResult(input, renderDonCheckResult(target.displayName, isSheriffVisibleToDon(target.role as Role)));
+    } else if (actionType === 'PROSTITUTE_VISIT') {
+      await this.sendInvestigationResult(input, `💋 Визит к ${target.displayName} принят. Это действие нельзя изменить.`);
     } else {
       await this.sendText(input, renderNightChoiceAccepted());
     }

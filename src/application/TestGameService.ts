@@ -182,8 +182,8 @@ export class TestGameService {
     const previousTargetId = await this.nightActionRepository.getLatestTarget({ gameId: game.id, actorPlayerId: prostitute.id, actionType: 'PROSTITUTE_VISIT' });
     const target = selectNightTarget(prostitute, alivePlayers, 'PROSTITUTE_VISIT', previousTargetId);
     if (target === undefined) {
-      this.logger.warn({ gameId: game.id, phaseVersion: game.stateVersion }, '[TestGameService.playVirtualProstituteAction] No valid virtual prostitute target');
-      return null;
+      this.logger.warn({ gameId: game.id, phaseVersion: game.stateVersion }, '[FIX:virtual-prostitute] No valid virtual prostitute target; completing the stage without a visit');
+      return this.phaseService.completeProstituteNight(game.id, game.stateVersion);
     }
     const created = await this.nightActionRepository.createRestrictedSingleUseAction({
       gameId: game.id,
@@ -194,11 +194,14 @@ export class TestGameService {
       rejectRepeatedTarget: true,
       rejectRepeatedSelfSave: false,
     });
-    if (created.action === null) {
-      this.logger.warn({ gameId: game.id, phaseVersion: game.stateVersion }, '[TestGameService.playVirtualProstituteAction] Virtual prostitute action rejected');
-      return null;
+    if (created.action === null && created.rejection !== 'DUPLICATE') {
+      this.logger.warn({ gameId: game.id, phaseVersion: game.stateVersion, rejection: created.rejection }, '[FIX:virtual-prostitute] Virtual prostitute action rejected; completing the stage without a new visit');
+      return this.phaseService.completeProstituteNight(game.id, game.stateVersion);
     }
-    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion, actionCount: 1 }, '[TestGameService.playVirtualProstituteAction] Submitted virtual prostitute action');
+    this.logger.info(
+      { gameId: game.id, phaseVersion: game.stateVersion, actionCount: created.action === null ? 0 : 1, alreadyRecorded: created.rejection === 'DUPLICATE' },
+      '[FIX:virtual-prostitute] Submitted virtual prostitute action',
+    );
     return this.phaseService.completeProstituteNight(game.id, game.stateVersion);
   }
 

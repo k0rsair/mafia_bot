@@ -107,6 +107,50 @@ describe('NightActionService commissioner checks', () => {
     expect(createRestrictedSingleUseAction).toHaveBeenCalledTimes(2);
     expect(sendText).toHaveBeenCalledTimes(1);
   });
+
+  it('records a prostitute visit and replaces the panel with a final confirmation', async () => {
+    const game = { id: 'game-1', chatId: '-1001', phase: 'NIGHT_PROSTITUTE', stateVersion: 7 } as Game;
+    const prostitute = { id: 'prostitute-player', userId: 'user-1', role: 'PROSTITUTE', status: 'ALIVE' } as Player;
+    const target = { id: 'player-2', userId: 'user-2', displayName: 'Игрок 2', role: 'CIVILIAN', status: 'ALIVE' } as Player;
+    const createRestrictedSingleUseAction = vi.fn().mockResolvedValue({ action: { id: 'visit-1' }, rejection: null });
+    const editText = vi.fn().mockResolvedValue(undefined);
+    const sendText = vi.fn();
+    const service = new NightActionService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockResolvedValue(prostitute),
+        listAlivePlayers: vi.fn().mockResolvedValue([prostitute, target]),
+      } as unknown as PlayerRepository,
+      { createRestrictedSingleUseAction } as unknown as NightActionRepository,
+      { sendText, editText } as unknown as TelegramEphemeralAdapter,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await service.submitTarget({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      chatId: game.chatId,
+      userId: prostitute.userId,
+      callbackQueryId: 'query-1',
+      ephemeralMessageId: 42,
+      targetIndex: 1,
+    });
+
+    expect(createRestrictedSingleUseAction).toHaveBeenCalledWith(expect.objectContaining({
+      actionType: 'PROSTITUTE_VISIT',
+      actorPlayerId: prostitute.id,
+      targetPlayerId: target.id,
+      rejectRepeatedTarget: true,
+    }));
+    expect(editText).toHaveBeenCalledWith({
+      chatId: game.chatId,
+      receiverUserId: prostitute.userId,
+      ephemeralMessageId: 42,
+      text: expect.stringContaining('Визит к Игрок 2 принят'),
+      replyMarkup: { inline_keyboard: [] },
+    });
+    expect(sendText).not.toHaveBeenCalled();
+  });
 });
 
 describe('NightActionService panel restoration', () => {

@@ -195,4 +195,45 @@ describe('day vote callbacks', () => {
     expect(reply).toHaveBeenCalledWith('🗳️ Основное голосование', { reply_markup: { inline_keyboard: [] } });
     expect(recordControlMessage).toHaveBeenCalledWith(primaryGame.id, 42);
   });
+
+  it('lets a virtual prostitute act before opening the regular night after a city vote', async () => {
+    const voteGame = { id: 'game-1', chatId: '-1001', phase: 'DAY_VOTE', stateVersion: 7, controlMessageId: 41 } as Game;
+    const prostituteNight = { ...voteGame, phase: 'NIGHT_PROSTITUTE', stateVersion: 8 } as Game;
+    const regularNight = { ...voteGame, phase: 'NIGHT', stateVersion: 9 } as Game;
+    const playVirtualProstituteAction = vi.fn().mockResolvedValue(regularNight);
+    const playVirtualNightActions = vi.fn().mockResolvedValue(null);
+    const deliverNightPanels = vi.fn().mockResolvedValue(undefined);
+    const recordControlMessage = vi.fn().mockResolvedValue(undefined);
+    const reply = vi.fn().mockResolvedValue({ message_id: 42 });
+
+    await publishVoteClosure(
+      { api: { editMessageText: vi.fn().mockResolvedValue(true) }, reply } as unknown as Context,
+      {
+        kind: 'DAY_VOTE_RESOLVED',
+        game: prostituteNight,
+        resolution: {
+          resolution: { outcome: 'SKIP', eliminatedPlayerId: null, eliminatedPlayerIds: [], tiedPlayerIds: [] },
+          eliminatedPlayers: [],
+          eliminatedPlayer: null,
+          alibiedPlayers: [],
+          voteDetails: [],
+        },
+      },
+      {} as never,
+      {
+        getCurrentGame: vi.fn()
+          .mockResolvedValueOnce(prostituteNight)
+          .mockResolvedValueOnce(regularNight),
+        recordControlMessage,
+      } as never,
+      {} as never,
+      { deliverNightPanels } as never,
+      { playVirtualProstituteAction, playVirtualNightActions } as never,
+    );
+
+    expect(playVirtualProstituteAction).toHaveBeenCalledWith(prostituteNight);
+    expect(playVirtualNightActions).toHaveBeenCalledWith(regularNight);
+    expect(reply).toHaveBeenCalledWith(expect.stringContaining('Ночь наступила'), expect.any(Object));
+    expect(deliverNightPanels).toHaveBeenCalledWith(regularNight);
+  });
 });

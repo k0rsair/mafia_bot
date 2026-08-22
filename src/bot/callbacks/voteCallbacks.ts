@@ -158,6 +158,11 @@ async function publishCityNightStart(
     return;
   }
   if (currentGame.phase === 'NIGHT_PROSTITUTE') {
+    const regularNight = await testGameService.playVirtualProstituteAction(currentGame);
+    if (regularNight !== null) {
+      await publishCityNightStart(context, regularNight, phaseService, nightActionService, testGameService, roleDisplayNames);
+      return;
+    }
     const view = renderProstituteNightControl(roleDisplayNames);
     const control = await context.reply(view.text, { reply_markup: view.replyMarkup });
     await phaseService.recordControlMessage(currentGame.id, control.message_id);
