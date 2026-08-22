@@ -44,8 +44,16 @@ const ROLE_LABELS: Readonly<Record<Role, string>> = {
   CIVILIAN: 'Мирный житель',
 };
 
-export function getRoleLabel(role: Role): string {
-  return ROLE_LABELS[role];
+export type RoleDisplayNames = Readonly<{
+  prostitute: string;
+}>;
+
+export const DEFAULT_ROLE_DISPLAY_NAMES: RoleDisplayNames = {
+  prostitute: ROLE_LABELS.PROSTITUTE,
+};
+
+export function getRoleLabel(role: Role, displayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES): string {
+  return role === 'PROSTITUTE' ? displayNames.prostitute : ROLE_LABELS[role];
 }
 
 export type RoleDistribution = Readonly<Record<Role, number>>;

@@ -30,6 +30,7 @@ import { renderNightControl, renderProstituteNightControl, renderRoleControl } f
 import { renderClosedVoteView } from './bot/views/voteView.js';
 import { renderFinalView } from './bot/views/finalView.js';
 import { registerCommandMenu } from './bot/commands/commandMenu.js';
+import type { RoleDisplayNames } from './domain/game/types.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -51,8 +52,8 @@ async function main(): Promise<void> {
   const phaseService = new PhaseService(gameRepository, nightResolutionService, votingService, gameFinalizationService, config, logger, playerRepository, dayService);
   const testGameService = new TestGameService(lobbyService, gameService, playerRepository, nightActionRepository, votingService, phaseService, logger);
   const ephemeralAdapter = new TelegramEphemeralAdapter(config.botToken, logger);
-  const nightActionService = new NightActionService(gameRepository, playerRepository, nightActionRepository, ephemeralAdapter, logger);
-  const ephemeralPanelService = new EphemeralPanelService(gameRepository, playerRepository, phaseService, nightActionService, ephemeralAdapter, logger);
+  const nightActionService = new NightActionService(gameRepository, playerRepository, nightActionRepository, ephemeralAdapter, logger, undefined, config.roleDisplayNames);
+  const ephemeralPanelService = new EphemeralPanelService(gameRepository, playerRepository, phaseService, nightActionService, ephemeralAdapter, logger, undefined, config.roleDisplayNames);
   const bot = createBot(config, logger, {
     lobbyService,
     gameService,
@@ -93,7 +94,7 @@ async function main(): Promise<void> {
         await publishNightStart(regularNight);
         return;
       }
-      const view = renderProstituteNightControl();
+      const view = renderProstituteNightControl(config.roleDisplayNames);
       const controlMessage = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
       await gameRepository.setControlMessageId(game.id, controlMessage.message_id);
       await nightActionService.deliverNightPanels(game);
@@ -105,7 +106,7 @@ async function main(): Promise<void> {
     }
     const testCompletion = await testGameService.playVirtualNightActions(game);
     if (testCompletion !== null) {
-      await publishVirtualNightCompletion(bot.api, testCompletion);
+      await publishVirtualNightCompletion(bot.api, testCompletion, config.roleDisplayNames);
       return;
     }
 
@@ -181,7 +182,7 @@ async function main(): Promise<void> {
         });
         await bot.api.sendMessage(result.game.chatId, dawnText);
       }
-      await bot.api.sendMessage(result.game.chatId, renderFinalView(result.finalization));
+      await bot.api.sendMessage(result.game.chatId, renderFinalView({ ...result.finalization, roleDisplayNames: config.roleDisplayNames }));
     }
   });
 
@@ -242,6 +243,7 @@ async function main(): Promise<void> {
 async function publishVirtualNightCompletion(
   api: Readonly<{ sendMessage(chatId: string, text: string): Promise<unknown> }>,
   completion: Extract<PhaseDeadlineResult, { kind: 'NIGHT_RESOLVED' | 'GAME_FINISHED' }> | null,
+  roleDisplayNames: RoleDisplayNames,
 ): Promise<void> {
   if (completion === null) {
     return;
@@ -259,7 +261,7 @@ async function publishVirtualNightCompletion(
   });
   await api.sendMessage(completion.game.chatId, dawnText);
   if (completion.kind === 'GAME_FINISHED') {
-    await api.sendMessage(completion.game.chatId, renderFinalView(completion.finalization));
+    await api.sendMessage(completion.game.chatId, renderFinalView({ ...completion.finalization, roleDisplayNames }));
     return;
   }
   await api.sendMessage(completion.game.chatId, renderDayDiscussion());

@@ -57,6 +57,7 @@ npm start
 | `DAY_DURATION_SECONDS` | `180` | Длительность дневного обсуждения |
 | `VOTE_DURATION_SECONDS` | `90` | Длительность номинаций, основного голосования, ревота и финального выбора |
 | `TIE_DISCUSSION_DURATION_SECONDS` | `30` | Обсуждение первой ничьей, не меньше 30 секунд |
+| `PROSTITUTE_ROLE_NAME` | `Шлюха` | Отображаемое имя роли `PROSTITUTE` в панелях, controls, ошибках и финальном раскрытии |
 | `TEST_GAME_ENABLED` | `false` | Включает development-команду `/testgame`; никогда не включайте в production-группе |
 
 Для интеграционных тестов отдельно задайте `TEST_DATABASE_URL` на изолированную PostgreSQL-базу с применёнными миграциями, затем выполните `npm run test:integration`.

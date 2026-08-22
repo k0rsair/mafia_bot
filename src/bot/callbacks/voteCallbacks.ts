@@ -5,6 +5,7 @@ import type { NightActionService } from '../../application/NightActionService.js
 import { VotingError, type AppliedVoteResolution, type ResolvedVoteRound, type VotingService } from '../../application/VotingService.js';
 import type { CityVoteClosure, PhaseService } from '../../application/PhaseService.js';
 import type { TestGameService } from '../../application/TestGameService.js';
+import { DEFAULT_ROLE_DISPLAY_NAMES, type RoleDisplayNames } from '../../domain/game/types.js';
 import type { AppLogger } from '../../observability/logger.js';
 import { isGameGroup } from '../authorization/chatPermissions.js';
 import { parseVoteCallback } from './callbackData.js';
@@ -21,6 +22,7 @@ export function registerVoteCallbacks(
   nightActionService: NightActionService,
   testGameService: TestGameService,
   logger: AppLogger,
+  roleDisplayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES,
 ): void {
   bot.callbackQuery(/^v:/, async (context) => {
     const callback = parseVoteCallback(context.callbackQuery.data);
@@ -52,7 +54,7 @@ export function registerVoteCallbacks(
         await context.answerCallbackQuery({ text: '✅ Голос принят.' });
         return;
       }
-      await publishVoteClosure(context, closure, dayService, phaseService, nightActionService, testGameService);
+      await publishVoteClosure(context, closure, dayService, phaseService, nightActionService, testGameService, roleDisplayNames);
       await context.answerCallbackQuery({ text: '✅ Голос принят.' });
     } catch (error) {
       logger.warn({ gameId: callback.gameId, userId: String(context.from.id), error }, '[registerVoteCallbacks] Rejected vote callback');
@@ -69,10 +71,11 @@ export async function publishVoteClosure(
   phaseService: Pick<PhaseService, 'recordControlMessage' | 'getCurrentGame'>,
   nightActionService: Pick<NightActionService, 'deliverNightPanels'>,
   testGameService: TestGameService,
+  roleDisplayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES,
 ): Promise<void> {
   if (closure.kind === 'GAME_FINISHED') {
     await closeVoteMessage(context, closure.voteResolution);
-    await context.reply(renderFinalView(closure.finalization));
+    await context.reply(renderFinalView({ ...closure.finalization, roleDisplayNames }));
     return;
   }
   if (closure.kind === 'DAY_VOTE_STARTED') {
@@ -94,7 +97,7 @@ export async function publishVoteClosure(
   }
 
   await closeVoteMessage(context, closure.resolution);
-  await publishCityNightStart(context, closure.game, phaseService, nightActionService, testGameService);
+  await publishCityNightStart(context, closure.game, phaseService, nightActionService, testGameService, roleDisplayNames);
 }
 
 async function publishCurrentRound(
@@ -118,13 +121,14 @@ async function publishCityNightStart(
   phaseService: Pick<PhaseService, 'recordControlMessage' | 'getCurrentGame'>,
   nightActionService: Pick<NightActionService, 'deliverNightPanels'>,
   testGameService: TestGameService,
+  roleDisplayNames: RoleDisplayNames,
 ): Promise<void> {
   const currentGame = await phaseService.getCurrentGame(game.id);
   if (currentGame === null || (currentGame.phase !== 'NIGHT_PROSTITUTE' && currentGame.phase !== 'NIGHT')) {
     return;
   }
   if (currentGame.phase === 'NIGHT_PROSTITUTE') {
-    const view = renderProstituteNightControl();
+    const view = renderProstituteNightControl(roleDisplayNames);
     const control = await context.reply(view.text, { reply_markup: view.replyMarkup });
     await phaseService.recordControlMessage(currentGame.id, control.message_id);
     await nightActionService.deliverNightPanels(currentGame);
@@ -132,7 +136,7 @@ async function publishCityNightStart(
   }
   const testCompletion = await testGameService.playVirtualNightActions(currentGame);
   if (testCompletion !== null) {
-    await publishNightCompletion(context, testCompletion);
+    await publishNightCompletion(context, testCompletion, roleDisplayNames);
     return;
   }
   const view = renderNightControl();

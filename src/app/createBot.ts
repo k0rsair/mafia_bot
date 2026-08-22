@@ -53,8 +53,8 @@ export function createBot(config: AppConfig, logger: AppLogger, dependencies: Bo
     config,
     logger,
   });
-  registerEphemeralCallbacks(bot, dependencies.ephemeralPanelService, dependencies.nightActionService, dependencies.phaseService, dependencies.testGameService, logger);
-  registerVoteCallbacks(bot, dependencies.votingService, dependencies.dayService, dependencies.phaseService, dependencies.nightActionService, dependencies.testGameService, logger);
+  registerEphemeralCallbacks(bot, dependencies.ephemeralPanelService, dependencies.nightActionService, dependencies.phaseService, dependencies.testGameService, logger, config.roleDisplayNames);
+  registerVoteCallbacks(bot, dependencies.votingService, dependencies.dayService, dependencies.phaseService, dependencies.nightActionService, dependencies.testGameService, logger, config.roleDisplayNames);
 
   bot.catch((error) => {
     logger.error(

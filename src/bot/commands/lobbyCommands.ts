@@ -30,7 +30,7 @@ type LobbyHandlerDependencies = Readonly<{
   nightActionService: NightActionService;
   ephemeralAdapter: TelegramEphemeralAdapter;
   testGameService: TestGameService;
-  config: Pick<AppConfig, 'lobbyMaxPlayers' | 'testGameEnabled'>;
+  config: Pick<AppConfig, 'lobbyMaxPlayers' | 'testGameEnabled' | 'roleDisplayNames'>;
   logger: AppLogger;
 }>;
 
@@ -314,7 +314,7 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
 async function republishCurrentControl(
   context: Context,
   game: Readonly<{ id: string; phase: string; stateVersion: number }>,
-  dependencies: Pick<LobbyHandlerDependencies, 'dayService' | 'phaseService'>,
+  dependencies: Pick<LobbyHandlerDependencies, 'config' | 'dayService' | 'phaseService'>,
 ): Promise<void> {
   if (game.phase === 'ROLE_CONFIRMATION') {
     const view = renderRoleControl();
@@ -323,7 +323,7 @@ async function republishCurrentControl(
     return;
   }
   if (game.phase === 'NIGHT_PROSTITUTE' || game.phase === 'NIGHT') {
-    const view = game.phase === 'NIGHT_PROSTITUTE' ? renderProstituteNightControl() : renderNightControl();
+    const view = game.phase === 'NIGHT_PROSTITUTE' ? renderProstituteNightControl(dependencies.config.roleDisplayNames) : renderNightControl();
     const controlMessage = await context.reply(`ℹ️ Фаза: ночь.\n\n${view.text}`, { reply_markup: view.replyMarkup });
     await dependencies.phaseService.recordControlMessage(game.id, controlMessage.message_id);
     return;
@@ -375,6 +375,7 @@ async function closeCityRoundFromContext(
     dependencies.phaseService,
     dependencies.nightActionService,
     dependencies.testGameService,
+    dependencies.config.roleDisplayNames,
   );
 }
 
@@ -435,7 +436,7 @@ async function publishAutomaticRoleDeliveryCompletion(
     if (regularNight !== null) {
       const testCompletion = await dependencies.testGameService.playVirtualNightActions(regularNight);
       if (testCompletion !== null) {
-        await publishNightCompletion(context, testCompletion);
+        await publishNightCompletion(context, testCompletion, dependencies.config.roleDisplayNames);
         return;
       }
       const view = renderNightControl();
@@ -444,7 +445,7 @@ async function publishAutomaticRoleDeliveryCompletion(
       await dependencies.nightActionService.deliverNightPanels(regularNight);
       return;
     }
-    const view = renderProstituteNightControl();
+    const view = renderProstituteNightControl(dependencies.config.roleDisplayNames);
     const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
     await dependencies.gameService.recordControlMessage(result.nightGame.id, controlMessage.message_id);
     await dependencies.nightActionService.deliverNightPanels(result.nightGame);
@@ -453,7 +454,7 @@ async function publishAutomaticRoleDeliveryCompletion(
 
   const testCompletion = await dependencies.testGameService.playVirtualNightActions(result.nightGame);
   if (testCompletion !== null) {
-    await publishNightCompletion(context, testCompletion);
+    await publishNightCompletion(context, testCompletion, dependencies.config.roleDisplayNames);
     return;
   }
 

@@ -12,7 +12,7 @@ import {
   renderNoNightAction,
 } from '../bot/views/ephemeralPanelView.js';
 import { canActionChooseTarget, isMafiaFaction, isMafiaVisibleToSheriff, isSheriffVisibleToDon } from '../domain/game/rules.js';
-import type { NightActionType, Role } from '../domain/game/types.js';
+import { DEFAULT_ROLE_DISPLAY_NAMES, type NightActionType, type Role, type RoleDisplayNames } from '../domain/game/types.js';
 import type { AppLogger } from '../observability/logger.js';
 import type { TelegramEphemeralAdapter } from '../bot/telegram/ephemeral.js';
 import type { GameRepository } from '../infrastructure/repositories/GameRepository.js';
@@ -49,6 +49,7 @@ export class NightActionService {
     private readonly ephemeralAdapter: TelegramEphemeralAdapter,
     private readonly logger: AppLogger,
     private readonly callbackGuard: CallbackGuardService = new CallbackGuardService(),
+    private readonly roleDisplayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES,
   ) {}
 
   public async openNightPanel(input: NightPanelInput): Promise<void> {
@@ -115,7 +116,7 @@ export class NightActionService {
       throw new NightActionError('Эта проверка доступна только Дону.');
     }
     if (await this.isPersonalActionBlocked(game, player)) {
-      throw new NightActionError('Ваше ночное действие заблокировано визитом Шлюхи.');
+      throw new NightActionError(`Ваше ночное действие заблокировано визитом ${this.roleDisplayNames.prostitute}.`);
     }
     await this.submitActionTarget(input, game, player, 'DON_CHECK');
   }
@@ -126,7 +127,7 @@ export class NightActionService {
       throw new NightActionError('Пропустить ход может только Маньяк.');
     }
     if (await this.isPersonalActionBlocked(game, player)) {
-      throw new NightActionError('Ваше ночное действие заблокировано визитом Шлюхи.');
+      throw new NightActionError(`Ваше ночное действие заблокировано визитом ${this.roleDisplayNames.prostitute}.`);
     }
     const created = await this.nightActionRepository.createSingleUseAction({ gameId: game.id, phaseVersion: game.stateVersion, actionType: 'MANIAC_SKIP', actorPlayerId: player.id, targetPlayerId: null });
     if (created === null) {
@@ -219,7 +220,7 @@ export class NightActionService {
         && canActionChooseTarget({ actorRole: player.role as Role, actionType, targetRole: candidate.role as Role, isSelfTarget: candidate.id === player.id });
       return isAllowed ? [{ id: candidate.id, displayName: candidate.displayName, targetIndex }] : [];
     });
-    const panel = renderNightPanel({ gameId: game.id, phaseVersion: game.stateVersion, candidates, actionType });
+    const panel = renderNightPanel({ gameId: game.id, phaseVersion: game.stateVersion, candidates, actionType, roleDisplayNames: this.roleDisplayNames });
     await this.sendText(input, panel.text, panel.replyMarkup);
     this.logger.debug({ gameId: game.id, phase: game.phase, phaseVersion: game.stateVersion, candidateCount: candidates.length }, '[NightActionService.sendTargetPanel] Target panel delivered');
   }
@@ -279,17 +280,17 @@ export class NightActionService {
   private getDefaultActionType(game: Game, player: Player): NightActionType {
     if (player.role === null || player.role === 'CIVILIAN') throw new NightActionError('У вашей роли нет ночного действия.');
     if (game.phase === 'NIGHT_PROSTITUTE') {
-      if (player.role !== 'PROSTITUTE') throw new NightActionError('Сейчас действует только Шлюха.');
+      if (player.role !== 'PROSTITUTE') throw new NightActionError(`Сейчас действует только ${this.roleDisplayNames.prostitute}.`);
       return 'PROSTITUTE_VISIT';
     }
     if (player.role === 'MAFIA' || player.role === 'DON') return 'MAFIA_KILL';
-    if (player.role === 'PROSTITUTE') throw new NightActionError('Действие Шлюхи уже завершено.');
+    if (player.role === 'PROSTITUTE') throw new NightActionError(`Действие ${this.roleDisplayNames.prostitute} уже завершено.`);
     return roleToPersonalAction(player.role);
   }
 
   private async getRegularNightPlayer(input: NightPanelInput): Promise<Readonly<{ game: Game; player: Player }>> {
     const result = await this.getNightPlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
-    if (result.game.phase !== 'NIGHT') throw new NightActionError('Это действие доступно после завершения хода Шлюхи.');
+    if (result.game.phase !== 'NIGHT') throw new NightActionError(`Это действие доступно после завершения хода ${this.roleDisplayNames.prostitute}.`);
     return result;
   }
 

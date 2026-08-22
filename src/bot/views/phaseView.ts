@@ -1,4 +1,5 @@
 import type { InlineKeyboardMarkup } from 'grammy/types';
+import { DEFAULT_ROLE_DISPLAY_NAMES, type RoleDisplayNames } from '../../domain/game/types.js';
 
 export function renderRoleControl(): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
   return {
@@ -19,9 +20,9 @@ export function renderNightControl(): Readonly<{ text: string; replyMarkup: Inli
   };
 }
 
-export function renderProstituteNightControl(): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
+export function renderProstituteNightControl(roleDisplayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
   return {
-    text: '🌙 Ночная очередь началась. Личная панель Шлюхи отправлена автоматически; после её действия откроются остальные ночные панели.',
+    text: `🌙 Ночная очередь началась. Личная панель роли «${roleDisplayNames.prostitute}» отправлена автоматически; после её действия откроются остальные ночные панели.`,
     replyMarkup: { inline_keyboard: [] },
   };
 }

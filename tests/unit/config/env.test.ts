@@ -17,6 +17,7 @@ describe('environment configuration', () => {
       dayDurationSeconds: 180,
       voteDurationSeconds: 90,
       nightDurationSeconds: 120,
+      roleDisplayNames: { prostitute: 'Шлюха' },
       testGameEnabled: false,
     });
   });
@@ -29,5 +30,10 @@ describe('environment configuration', () => {
   it('enables the test-game command only for an explicit true value', () => {
     expect(loadConfig({ ...validEnvironment, TEST_GAME_ENABLED: 'true' }).testGameEnabled).toBe(true);
     expect(loadConfig({ ...validEnvironment, TEST_GAME_ENABLED: 'false' }).testGameEnabled).toBe(false);
+  });
+
+  it('uses the configured player-facing name for the PROSTITUTE role', () => {
+    expect(loadConfig({ ...validEnvironment, PROSTITUTE_ROLE_NAME: 'Путана' }).roleDisplayNames).toEqual({ prostitute: 'Путана' });
+    expect(() => loadConfig({ ...validEnvironment, PROSTITUTE_ROLE_NAME: '   ' })).toThrow(ConfigurationError);
   });
 });

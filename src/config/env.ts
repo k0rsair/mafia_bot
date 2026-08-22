@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_ROLE_DISPLAY_NAMES, type RoleDisplayNames } from '../domain/game/types.js';
 
 const logLevels = ['debug', 'info', 'warn', 'error', 'silent'] as const;
 
@@ -19,6 +20,7 @@ const environmentSchema = z.object({
   VOTE_DURATION_SECONDS: positiveInteger.default(90),
   TIE_DISCUSSION_DURATION_SECONDS: z.coerce.number().int().min(30).default(30),
   NIGHT_DURATION_SECONDS: positiveInteger.default(120),
+  PROSTITUTE_ROLE_NAME: z.string().trim().min(1).max(32).default(DEFAULT_ROLE_DISPLAY_NAMES.prostitute),
   TEST_GAME_ENABLED: booleanEnvironment,
 });
 
@@ -33,6 +35,7 @@ export type AppConfig = Readonly<{
   voteDurationSeconds: number;
   tieDiscussionDurationSeconds: number;
   nightDurationSeconds: number;
+  roleDisplayNames: RoleDisplayNames;
   testGameEnabled: boolean;
 }>;
 
@@ -64,6 +67,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     voteDurationSeconds: values.VOTE_DURATION_SECONDS,
     tieDiscussionDurationSeconds: values.TIE_DISCUSSION_DURATION_SECONDS,
     nightDurationSeconds: values.NIGHT_DURATION_SECONDS,
+    roleDisplayNames: { prostitute: values.PROSTITUTE_ROLE_NAME },
     testGameEnabled: values.TEST_GAME_ENABLED,
   };
 }

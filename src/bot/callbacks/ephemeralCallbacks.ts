@@ -5,6 +5,7 @@ import { EphemeralPanelError, type EphemeralPanelService, type RoleConfirmationR
 import { NightActionError, type NightActionService } from '../../application/NightActionService.js';
 import type { PhaseDeadlineResult, PhaseService } from '../../application/PhaseService.js';
 import type { TestGameService } from '../../application/TestGameService.js';
+import { DEFAULT_ROLE_DISPLAY_NAMES, type RoleDisplayNames } from '../../domain/game/types.js';
 import type { AppLogger } from '../../observability/logger.js';
 import { isGameGroup } from '../authorization/chatPermissions.js';
 import { parseGameCallback } from './callbackData.js';
@@ -20,6 +21,7 @@ export function registerEphemeralCallbacks(
   phaseService: PhaseService,
   testGameService: TestGameService,
   logger: AppLogger,
+  roleDisplayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES,
 ): void {
   bot.callbackQuery(/^g:/, async (context) => {
     const callback = parseGameCallback(context.callbackQuery.data);
@@ -43,7 +45,7 @@ export function registerEphemeralCallbacks(
       if (callback.action === 'panel') {
         const result = await panelService.openPanel(input);
         await context.answerCallbackQuery();
-        await publishRoleConfirmationCompletion(context, result, panelService, nightActionService, testGameService);
+        await publishRoleConfirmationCompletion(context, result, panelService, nightActionService, testGameService, roleDisplayNames);
         return;
       }
 
@@ -57,13 +59,13 @@ export function registerEphemeralCallbacks(
           const nightGame = await phaseService.completeProstituteNight(callback.gameId, callback.phaseVersion);
           await context.answerCallbackQuery({ text: '✅ Выбор принят.' });
           if (nightGame !== null) {
-            await publishRegularNightStart(context, nightGame, panelService, nightActionService, testGameService);
+            await publishRegularNightStart(context, nightGame, panelService, nightActionService, testGameService, roleDisplayNames);
           }
           return;
         }
         const completion = await phaseService.completeNightIfAllActionsCompleted(callback.gameId, callback.phaseVersion);
         await context.answerCallbackQuery({ text: '✅ Выбор принят.' });
-        await publishNightCompletion(context, completion);
+        await publishNightCompletion(context, completion, roleDisplayNames);
         return;
       }
 
@@ -74,7 +76,7 @@ export function registerEphemeralCallbacks(
         await nightActionService.submitDonCheck({ ...input, targetIndex: callback.targetIndex });
         const completion = await phaseService.completeNightIfAllActionsCompleted(callback.gameId, callback.phaseVersion);
         await context.answerCallbackQuery({ text: '✅ Проверка завершена.' });
-        await publishNightCompletion(context, completion);
+        await publishNightCompletion(context, completion, roleDisplayNames);
         return;
       }
 
@@ -82,7 +84,7 @@ export function registerEphemeralCallbacks(
         await nightActionService.skipManiacAction(input);
         const completion = await phaseService.completeNightIfAllActionsCompleted(callback.gameId, callback.phaseVersion);
         await context.answerCallbackQuery({ text: '✅ Ход пропущен.' });
-        await publishNightCompletion(context, completion);
+        await publishNightCompletion(context, completion, roleDisplayNames);
         return;
       }
 
@@ -90,13 +92,13 @@ export function registerEphemeralCallbacks(
         await nightActionService.confirmMafiaTarget(input);
         const completion = await phaseService.completeNightIfAllActionsCompleted(callback.gameId, callback.phaseVersion);
         await context.answerCallbackQuery({ text: '✅ Голос мафии подтверждён.' });
-        await publishNightCompletion(context, completion);
+        await publishNightCompletion(context, completion, roleDisplayNames);
         return;
       }
 
       const result = await panelService.confirmRole(input);
       await context.answerCallbackQuery({ text: '✅ Роль подтверждена.' });
-      await publishRoleConfirmationCompletion(context, result, panelService, nightActionService, testGameService);
+      await publishRoleConfirmationCompletion(context, result, panelService, nightActionService, testGameService, roleDisplayNames);
     } catch (error) {
       logger.warn({ gameId: callback.gameId, userId: input.userId, error }, '[registerEphemeralCallbacks] Rejected ephemeral callback');
       const text = error instanceof EphemeralPanelError || error instanceof NightActionError
@@ -113,6 +115,7 @@ async function publishRoleConfirmationCompletion(
   panelService: EphemeralPanelService,
   nightActionService: Pick<NightActionService, 'deliverNightPanels'>,
   testGameService: TestGameService,
+  roleDisplayNames: RoleDisplayNames,
 ): Promise<void> {
   if (!result.nightStarted || result.nightGame === undefined) {
     return;
@@ -121,16 +124,16 @@ async function publishRoleConfirmationCompletion(
   if (result.nightGame.phase === 'NIGHT_PROSTITUTE') {
     const regularNight = await testGameService.playVirtualProstituteAction(result.nightGame);
     if (regularNight !== null) {
-      await publishRegularNightStart(context, regularNight, panelService, nightActionService, testGameService);
+      await publishRegularNightStart(context, regularNight, panelService, nightActionService, testGameService, roleDisplayNames);
       return;
     }
-    const view = renderProstituteNightControl();
+    const view = renderProstituteNightControl(roleDisplayNames);
     const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
     await panelService.recordControlMessage(result.nightGame.id, controlMessage.message_id);
     await nightActionService.deliverNightPanels(result.nightGame);
     return;
   }
-  await publishRegularNightStart(context, result.nightGame, panelService, nightActionService, testGameService);
+  await publishRegularNightStart(context, result.nightGame, panelService, nightActionService, testGameService, roleDisplayNames);
 }
 
 async function publishRegularNightStart(
@@ -139,13 +142,14 @@ async function publishRegularNightStart(
   panelService: Pick<EphemeralPanelService, 'recordControlMessage'>,
   nightActionService: Pick<NightActionService, 'deliverNightPanels'>,
   testGameService: TestGameService,
+  roleDisplayNames: RoleDisplayNames,
 ): Promise<void> {
   if (game.phase !== 'NIGHT') {
     return;
   }
   const testCompletion = await testGameService.playVirtualNightActions(game);
   if (testCompletion !== null) {
-    await publishNightCompletion(context, testCompletion);
+    await publishNightCompletion(context, testCompletion, roleDisplayNames);
     return;
   }
   const view = renderNightControl();
@@ -157,6 +161,7 @@ async function publishRegularNightStart(
 export async function publishNightCompletion(
   context: Context,
   completion: Extract<PhaseDeadlineResult, { kind: 'NIGHT_RESOLVED' | 'GAME_FINISHED' }> | null,
+  roleDisplayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES,
 ): Promise<void> {
   if (completion === null) {
     return;
@@ -175,7 +180,7 @@ export async function publishNightCompletion(
   });
   await context.reply(dawnText);
   if (completion.kind === 'GAME_FINISHED') {
-    await context.reply(renderFinalView(completion.finalization));
+    await context.reply(renderFinalView({ ...completion.finalization, roleDisplayNames }));
     return;
   }
 

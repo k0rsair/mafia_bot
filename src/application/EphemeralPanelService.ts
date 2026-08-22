@@ -5,6 +5,7 @@ import type { AppLogger } from '../observability/logger.js';
 import type { TelegramEphemeralAdapter } from '../bot/telegram/ephemeral.js';
 import type { GameRepository } from '../infrastructure/repositories/GameRepository.js';
 import type { PlayerRepository } from '../infrastructure/repositories/PlayerRepository.js';
+import { DEFAULT_ROLE_DISPLAY_NAMES, type RoleDisplayNames } from '../domain/game/types.js';
 import type { PhaseService } from './PhaseService.js';
 import type { NightActionService } from './NightActionService.js';
 import { isVirtualTestPlayer } from './TestGameService.js';
@@ -43,6 +44,7 @@ export class EphemeralPanelService {
     private readonly ephemeralAdapter: TelegramEphemeralAdapter,
     private readonly logger: AppLogger,
     private readonly callbackGuard: CallbackGuardService = new CallbackGuardService(),
+    private readonly roleDisplayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES,
   ) {}
 
   public async openPanel(input: PanelCallbackInput): Promise<RoleConfirmationResult> {
@@ -119,7 +121,7 @@ export class EphemeralPanelService {
       throw new EphemeralPanelError('Роль ещё не назначена. Попробуйте позже.');
     }
 
-    const panel = renderRolePanel({ role: player.role });
+    const panel = renderRolePanel({ role: player.role, roleDisplayNames: this.roleDisplayNames });
     await this.ephemeralAdapter.sendText({
       chatId: input.chatId,
       receiverUserId: input.userId,

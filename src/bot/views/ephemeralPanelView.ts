@@ -1,11 +1,11 @@
 import type { InlineKeyboardMarkup } from 'grammy/types';
 
 import { encodeDonCheckCallback, encodeGameCallback, encodeManiacSkipCallback, encodeNightTargetCallback } from '../callbacks/callbackData.js';
-import type { NightActionType, Role } from '../../domain/game/types.js';
+import { DEFAULT_ROLE_DISPLAY_NAMES, type NightActionType, type Role, type RoleDisplayNames } from '../../domain/game/types.js';
 
-export function renderRolePanel(input: Readonly<{ role: Role }>): Readonly<{ text: string }> {
+export function renderRolePanel(input: Readonly<{ role: Role; roleDisplayNames?: RoleDisplayNames }>): Readonly<{ text: string }> {
   return {
-    text: `${roleDescription(input.role)}\n\n✅ Получение роли засчитано автоматически.`,
+    text: `${roleDescription(input.role, input.roleDisplayNames ?? DEFAULT_ROLE_DISPLAY_NAMES)}\n\n✅ Получение роли засчитано автоматически.`,
   };
 }
 
@@ -14,6 +14,7 @@ export function renderNightPanel(input: Readonly<{
   phaseVersion: number;
   candidates: readonly Readonly<{ id: string; displayName: string; targetIndex: number }>[];
   actionType?: NightActionType;
+  roleDisplayNames?: RoleDisplayNames;
 }>): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
   const choices = input.candidates.map((candidate) =>
     ({
@@ -23,7 +24,7 @@ export function renderNightPanel(input: Readonly<{
   );
 
   return {
-    text: nightPrompt(input.actionType ?? 'COMMISSIONER_CHECK'),
+    text: nightPrompt(input.actionType ?? 'COMMISSIONER_CHECK', input.roleDisplayNames ?? DEFAULT_ROLE_DISPLAY_NAMES),
     replyMarkup: { inline_keyboard: chunk(choices, 2) },
   };
 }
@@ -117,7 +118,7 @@ export function renderNoNightAction(): string {
   return '🌙 Ночью у вашей роли нет действия. Дождитесь рассвета.';
 }
 
-function roleDescription(role: Role): string {
+function roleDescription(role: Role, roleDisplayNames: RoleDisplayNames): string {
   switch (role) {
     case 'MAFIA':
       return '🕶️ Ваша роль: МАФИЯ\nНочью откройте скрытую панель и выберите жертву. Днём не выдавайте себя.';
@@ -130,16 +131,16 @@ function roleDescription(role: Role): string {
     case 'DON':
       return '👑 Ваша роль: ДОН\nНочью участвуйте в совете мафии и проверяйте одного игрока на Шерифа.';
     case 'PROSTITUTE':
-      return '💋 Ваша роль: ШЛЮХА\nВы действуете первой: выберите живого игрока, кроме себя. Нельзя приходить к одной цели две ночи подряд.';
+      return `💋 Ваша роль: ${roleDisplayNames.prostitute.toLocaleUpperCase('ru')}\nВы действуете первой: выберите живого игрока, кроме себя. Нельзя приходить к одной цели две ночи подряд.`;
     case 'MANIAC':
       return '🔪 Ваша роль: МАНЬЯК\nНочью выберите жертву или пропустите ход. Вы играете один.';
   }
 }
 
-function nightPrompt(actionType: NightActionType): string {
+function nightPrompt(actionType: NightActionType, roleDisplayNames: RoleDisplayNames): string {
   switch (actionType) {
     case 'PROSTITUTE_VISIT':
-      return '💋 Вы действуете первой. Выберите живого игрока, кроме себя. Нельзя ходить к одному человеку две ночи подряд.';
+      return `💋 Вы действуете первой как ${roleDisplayNames.prostitute}. Выберите живого игрока, кроме себя. Нельзя ходить к одному человеку две ночи подряд.`;
     case 'DOCTOR_SAVE':
       return '💉 Выберите, кого лечить. Одного человека нельзя лечить две ночи подряд; себя можно лечить один раз за игру.';
     case 'COMMISSIONER_CHECK':
