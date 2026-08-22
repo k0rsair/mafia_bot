@@ -1,42 +1,86 @@
 import { describe, expect, it } from 'vitest';
 
 import { resolveNight } from '../../../src/domain/game/nightResolution.js';
-import { resolveVote } from '../../../src/domain/game/voteResolution.js';
+import { resolveFinalDecision, resolveVote } from '../../../src/domain/game/voteResolution.js';
 import { getWinningFaction } from '../../../src/domain/game/winConditions.js';
 
-describe('night resolution', () => {
-  it('eliminates the unique mafia target unless the doctor saves that player', () => {
-    expect(resolveNight([
-      { actionType: 'MAFIA_KILL', actorPlayerId: 'm1', targetPlayerId: 'p2' },
-      { actionType: 'MAFIA_KILL', actorPlayerId: 'm2', targetPlayerId: 'p2' },
-      { actionType: 'DOCTOR_SAVE', actorPlayerId: 'd1', targetPlayerId: 'p3' },
-    ])).toEqual({ attackedPlayerId: 'p2', savedPlayerId: 'p3', eliminatedPlayerId: 'p2' });
+describe('city night resolution', () => {
+  const players = [
+    { id: 'mafia', role: 'MAFIA' },
+    { id: 'don', role: 'DON' },
+    { id: 'doctor', role: 'DOCTOR' },
+    { id: 'prostitute', role: 'PROSTITUTE' },
+    { id: 'client', role: 'CIVILIAN' },
+    { id: 'maniac', role: 'MANIAC' },
+    { id: 'resident', role: 'CIVILIAN' },
+  ] as const;
 
-    expect(resolveNight([
-      { actionType: 'MAFIA_KILL', actorPlayerId: 'm1', targetPlayerId: 'p2' },
-      { actionType: 'DOCTOR_SAVE', actorPlayerId: 'd1', targetPlayerId: 'p2' },
-    ]).eliminatedPlayerId).toBeNull();
+  it('blocks the mafia shot when the prostitute visits a Mafia-faction member', () => {
+    const resolution = resolveNight({
+      players,
+      actions: [
+        { actionType: 'PROSTITUTE_VISIT', actorPlayerId: 'prostitute', targetPlayerId: 'don' },
+        { actionType: 'MAFIA_KILL', actorPlayerId: 'mafia', targetPlayerId: 'resident' },
+      ],
+    });
+
+    expect(resolution.eliminatedPlayerIds).toEqual([]);
+    expect(resolution.mafiaTargetId).toBeNull();
   });
 
-  it('does not eliminate anyone when mafia choices are tied', () => {
-    expect(resolveNight([
-      { actionType: 'MAFIA_KILL', actorPlayerId: 'm1', targetPlayerId: 'p2' },
-      { actionType: 'MAFIA_KILL', actorPlayerId: 'm2', targetPlayerId: 'p3' },
-    ])).toEqual({ attackedPlayerId: null, savedPlayerId: null, eliminatedPlayerId: null });
+  it('applies independent maniac damage and linked prostitute death without duplicate eliminations', () => {
+    const resolution = resolveNight({
+      players,
+      actions: [
+        { actionType: 'PROSTITUTE_VISIT', actorPlayerId: 'prostitute', targetPlayerId: 'client' },
+        { actionType: 'MAFIA_KILL', actorPlayerId: 'mafia', targetPlayerId: 'prostitute' },
+        { actionType: 'MANIAC_KILL', actorPlayerId: 'maniac', targetPlayerId: 'client' },
+      ],
+    });
+
+    expect(resolution.eliminatedPlayerIds).toEqual(['prostitute', 'client']);
+  });
+
+  it('handles the documented doctor and prostitute mafia cases', () => {
+    const doctorSavesProstitute = resolveNight({
+      players,
+      actions: [
+        { actionType: 'PROSTITUTE_VISIT', actorPlayerId: 'prostitute', targetPlayerId: 'client' },
+        { actionType: 'MAFIA_KILL', actorPlayerId: 'mafia', targetPlayerId: 'prostitute' },
+        { actionType: 'DOCTOR_SAVE', actorPlayerId: 'doctor', targetPlayerId: 'prostitute' },
+      ],
+    });
+    const doctorSavesClient = resolveNight({
+      players,
+      actions: [
+        { actionType: 'PROSTITUTE_VISIT', actorPlayerId: 'prostitute', targetPlayerId: 'client' },
+        { actionType: 'MAFIA_KILL', actorPlayerId: 'mafia', targetPlayerId: 'prostitute' },
+        { actionType: 'DOCTOR_SAVE', actorPlayerId: 'doctor', targetPlayerId: 'client' },
+      ],
+    });
+
+    expect(doctorSavesProstitute.eliminatedPlayerIds).toEqual([]);
+    expect(doctorSavesProstitute.savedPlayerIds).toEqual(['prostitute', 'client']);
+    expect(doctorSavesClient.eliminatedPlayerIds).toEqual(['prostitute']);
+    expect(doctorSavesClient.savedPlayerIds).toEqual([]);
   });
 });
 
-describe('vote resolution and victory', () => {
-  it('handles elimination, skip, tie, and no votes', () => {
-    expect(resolveVote([{ targetPlayerId: 'p2', isSkip: false }, { targetPlayerId: 'p2', isSkip: false }])).toEqual({ eliminatedPlayerId: 'p2', outcome: 'ELIMINATION' });
-    expect(resolveVote([{ targetPlayerId: null, isSkip: true }])).toEqual({ eliminatedPlayerId: null, outcome: 'SKIP' });
-    expect(resolveVote([{ targetPlayerId: 'p2', isSkip: false }, { targetPlayerId: 'p3', isSkip: false }])).toEqual({ eliminatedPlayerId: null, outcome: 'TIE' });
-    expect(resolveVote([])).toEqual({ eliminatedPlayerId: null, outcome: 'NO_VOTES' });
+describe('city vote resolution and victory', () => {
+  it('returns persisted tied candidates and resolves the final binary decision', () => {
+    expect(resolveVote([{ targetPlayerId: 'p2', isSkip: false }, { targetPlayerId: 'p3', isSkip: false }])).toMatchObject({ outcome: 'TIE', tiedPlayerIds: ['p2', 'p3'] });
+    expect(resolveFinalDecision([
+      { targetPlayerId: 'p2', isSkip: false },
+      { targetPlayerId: 'p2', isSkip: false },
+      { targetPlayerId: null, isSkip: true },
+    ], ['p2', 'p3'])).toMatchObject({ outcome: 'ELIMINATION', eliminatedPlayerIds: ['p2', 'p3'] });
+    expect(resolveFinalDecision([{ targetPlayerId: null, isSkip: true }], ['p2', 'p3']).eliminatedPlayerIds).toEqual([]);
   });
 
-  it('recognises both winning factions', () => {
+  it('recognises peaceful, Mafia, and final Maniac wins', () => {
     expect(getWinningFaction([{ id: 'm1', role: 'MAFIA' }, { id: 'p1', role: 'CIVILIAN' }])).toBe('MAFIA');
     expect(getWinningFaction([{ id: 'p1', role: 'CIVILIAN' }, { id: 'p2', role: 'DOCTOR' }])).toBe('PEACEFUL');
-    expect(getWinningFaction([{ id: 'm1', role: 'MAFIA' }, { id: 'p1', role: 'CIVILIAN' }, { id: 'p2', role: 'COMMISSIONER' }])).toBeNull();
+    expect(getWinningFaction([{ id: 'x', role: 'MANIAC' }, { id: 'p1', role: 'CIVILIAN' }])).toBe('MANIAC');
+    expect(getWinningFaction([{ id: 'x', role: 'MANIAC' }, { id: 's', role: 'COMMISSIONER' }])).toBeNull();
   });
 });

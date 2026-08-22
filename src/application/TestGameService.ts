@@ -1,6 +1,6 @@
 import type { Game, Player } from '@prisma/client';
 
-import { canRoleChooseTarget } from '../domain/game/rules.js';
+import { canActionChooseTarget } from '../domain/game/rules.js';
 import type { NightActionType, Role } from '../domain/game/types.js';
 import type { AppLogger } from '../observability/logger.js';
 import type { NightActionRepository } from '../infrastructure/repositories/NightActionRepository.js';
@@ -17,6 +17,10 @@ const VIRTUAL_TEST_PLAYERS = [
   { userId: `${TEST_PLAYER_PREFIX}2`, displayName: '🤖 Тестовый игрок 2' },
   { userId: `${TEST_PLAYER_PREFIX}3`, displayName: '🤖 Тестовый игрок 3' },
   { userId: `${TEST_PLAYER_PREFIX}4`, displayName: '🤖 Тестовый игрок 4' },
+  { userId: `${TEST_PLAYER_PREFIX}5`, displayName: '🤖 Тестовый игрок 5' },
+  { userId: `${TEST_PLAYER_PREFIX}6`, displayName: '🤖 Тестовый игрок 6' },
+  { userId: `${TEST_PLAYER_PREFIX}7`, displayName: '🤖 Тестовый игрок 7' },
+  { userId: `${TEST_PLAYER_PREFIX}8`, displayName: '🤖 Тестовый игрок 8' },
 ] as const;
 
 export function isVirtualTestPlayer(userId: string): boolean {
@@ -91,7 +95,10 @@ export class TestGameService {
       if (actionType === null) {
         continue;
       }
-      const target = selectNightTarget(actor, alivePlayers);
+      const previousTargetId = actionType === 'DOCTOR_SAVE'
+        ? await this.nightActionRepository.getLatestTarget({ gameId: game.id, actorPlayerId: actor.id, actionType })
+        : null;
+      const target = selectNightTarget(actor, alivePlayers, actionType, previousTargetId);
       if (target === undefined) {
         this.logger.warn({ gameId: game.id, phaseVersion: game.stateVersion }, '[TestGameService.playVirtualNightActions] No valid virtual night target');
         continue;
@@ -108,6 +115,29 @@ export class TestGameService {
           gameId: game.id,
           phaseVersion: game.stateVersion,
           actorPlayerId: actor.id,
+        });
+        if (actor.role === 'DON') {
+          const checkTarget = selectNightTarget(actor, alivePlayers, 'DON_CHECK');
+          if (checkTarget !== undefined) {
+            await this.nightActionRepository.createSingleUseAction({
+              gameId: game.id,
+              phaseVersion: game.stateVersion,
+              actionType: 'DON_CHECK',
+              actorPlayerId: actor.id,
+              targetPlayerId: checkTarget.id,
+            });
+            actionCount += 1;
+          }
+        }
+      } else if (actionType === 'DOCTOR_SAVE') {
+        await this.nightActionRepository.createRestrictedSingleUseAction({
+          gameId: game.id,
+          phaseVersion: game.stateVersion,
+          actionType,
+          actorPlayerId: actor.id,
+          targetPlayerId: target.id,
+          rejectRepeatedTarget: true,
+          rejectRepeatedSelfSave: true,
         });
       } else {
         await this.nightActionRepository.createSingleUseAction({
@@ -128,23 +158,57 @@ export class TestGameService {
     return this.phaseService.completeNightIfAllActionsCompleted(game.id, game.stateVersion);
   }
 
+  public async playVirtualProstituteAction(game: Game): Promise<Game | null> {
+    if (game.phase !== 'NIGHT_PROSTITUTE') {
+      return null;
+    }
+    const alivePlayers = await this.playerRepository.listAlivePlayers(game.id);
+    const prostitute = alivePlayers.find((player) => player.role === 'PROSTITUTE' && isVirtualTestPlayer(player.userId));
+    if (prostitute === undefined) {
+      return null;
+    }
+    const previousTargetId = await this.nightActionRepository.getLatestTarget({ gameId: game.id, actorPlayerId: prostitute.id, actionType: 'PROSTITUTE_VISIT' });
+    const target = selectNightTarget(prostitute, alivePlayers, 'PROSTITUTE_VISIT', previousTargetId);
+    if (target === undefined) {
+      this.logger.warn({ gameId: game.id, phaseVersion: game.stateVersion }, '[TestGameService.playVirtualProstituteAction] No valid virtual prostitute target');
+      return null;
+    }
+    const created = await this.nightActionRepository.createRestrictedSingleUseAction({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      actionType: 'PROSTITUTE_VISIT',
+      actorPlayerId: prostitute.id,
+      targetPlayerId: target.id,
+      rejectRepeatedTarget: true,
+      rejectRepeatedSelfSave: false,
+    });
+    if (created.action === null) {
+      this.logger.warn({ gameId: game.id, phaseVersion: game.stateVersion }, '[TestGameService.playVirtualProstituteAction] Virtual prostitute action rejected');
+      return null;
+    }
+    this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion, actionCount: 1 }, '[TestGameService.playVirtualProstituteAction] Submitted virtual prostitute action');
+    return this.phaseService.completeProstituteNight(game.id, game.stateVersion);
+  }
+
   public async castVirtualVotes(game: Game): Promise<VoteProgress | null> {
-    if (game.phase !== 'DAY_VOTE') {
-      this.logger.debug({ gameId: game.id, phase: game.phase }, '[TestGameService.castVirtualVotes] Skipped outside day vote');
+    if (!['DAY_NOMINATION', 'DAY_VOTE', 'DAY_REVOTE', 'DAY_FINAL_DECISION'].includes(game.phase)) {
+      this.logger.debug({ gameId: game.id, phase: game.phase }, '[TestGameService.castVirtualVotes] Skipped outside city vote');
       return null;
     }
 
     const alivePlayers = await this.playerRepository.listAlivePlayers(game.id);
     const virtualPlayers = alivePlayers.filter((player) => isVirtualTestPlayer(player.userId));
+    const options = await this.votingService.getVoteRoundOptions(game.id, game.stateVersion);
     let progress: VoteProgress | null = null;
     for (const voter of virtualPlayers) {
-      const target = selectVoteTarget(voter, alivePlayers);
+      const target = selectVoteTarget(voter, alivePlayers, options.candidatePlayerIds);
       progress = await this.votingService.castVote({
         gameId: game.id,
         phaseVersion: game.stateVersion,
         chatId: game.chatId,
         userId: voter.userId,
-        targetIndex: target === undefined ? null : alivePlayers.indexOf(target),
+        targetIndex: target === undefined ? null : (options.kind === null ? alivePlayers.indexOf(target) : options.candidatePlayerIds.indexOf(target.id)),
+        action: options.kind === 'FINAL_DECISION' ? 'all-stay' : 'candidate',
       });
     }
 
@@ -157,7 +221,7 @@ export class TestGameService {
 }
 
 function toNightActionType(role: Role | null): NightActionType | null {
-  if (role === 'MAFIA') {
+  if (role === 'MAFIA' || role === 'DON') {
     return 'MAFIA_KILL';
   }
   if (role === 'DOCTOR') {
@@ -166,21 +230,28 @@ function toNightActionType(role: Role | null): NightActionType | null {
   if (role === 'COMMISSIONER') {
     return 'COMMISSIONER_CHECK';
   }
+  if (role === 'MANIAC') {
+    return 'MANIAC_KILL';
+  }
   return null;
 }
 
-function selectNightTarget(actor: Player, alivePlayers: readonly Player[]): Player | undefined {
+function selectNightTarget(actor: Player, alivePlayers: readonly Player[], actionType: NightActionType, previousTargetId: string | null = null): Player | undefined {
   const actorRole = actor.role;
   if (actorRole === null) {
     return undefined;
   }
   const candidates = alivePlayers.filter((candidate) =>
-    candidate.role !== null && canRoleChooseTarget(actorRole, candidate.role, candidate.id === actor.id),
+    candidate.id !== previousTargetId && candidate.role !== null && canActionChooseTarget({ actorRole, actionType, targetRole: candidate.role, isSelfTarget: candidate.id === actor.id }),
   );
   return candidates.find((candidate) => isVirtualTestPlayer(candidate.userId)) ?? candidates[0];
 }
 
-function selectVoteTarget(voter: Player, alivePlayers: readonly Player[]): Player | undefined {
-  return alivePlayers.find((candidate) => candidate.id !== voter.id && isVirtualTestPlayer(candidate.userId))
-    ?? alivePlayers.find((candidate) => candidate.id !== voter.id);
+function selectVoteTarget(voter: Player, alivePlayers: readonly Player[], candidatePlayerIds: readonly string[]): Player | undefined {
+  const candidates = candidatePlayerIds.length === 0
+    ? alivePlayers
+    : candidatePlayerIds.flatMap((candidatePlayerId) => alivePlayers.filter((player) => player.id === candidatePlayerId));
+  return candidates.find((candidate) => candidate.id !== voter.id && isVirtualTestPlayer(candidate.userId))
+    ?? candidates.find((candidate) => candidate.id !== voter.id)
+    ?? candidates[0];
 }

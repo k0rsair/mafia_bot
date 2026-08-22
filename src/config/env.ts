@@ -13,7 +13,7 @@ const environmentSchema = z.object({
     .url('DATABASE_URL must be a valid URL')
     .refine((value) => value.startsWith('postgresql://') || value.startsWith('postgres://'), 'DATABASE_URL must use PostgreSQL'),
   LOG_LEVEL: z.enum(logLevels).default('debug'),
-  LOBBY_MAX_PLAYERS: positiveInteger.max(20).default(20),
+  LOBBY_MAX_PLAYERS: positiveInteger.max(15).default(15),
   ROLE_CONFIRMATION_DURATION_SECONDS: positiveInteger.default(300),
   DAY_DURATION_SECONDS: positiveInteger.default(180),
   VOTE_DURATION_SECONDS: positiveInteger.default(90),

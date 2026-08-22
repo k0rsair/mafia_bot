@@ -83,7 +83,9 @@ describe('NightActionService commissioner checks', () => {
     const doctor = { id: 'doctor-player', userId: 'user-1', role: 'DOCTOR', status: 'ALIVE' } as Player;
     const firstTarget = { id: 'player-2', userId: 'user-2', displayName: 'Игрок 2', role: 'CIVILIAN', status: 'ALIVE' } as Player;
     const secondTarget = { id: 'player-3', userId: 'user-3', displayName: 'Игрок 3', role: 'MAFIA', status: 'ALIVE' } as Player;
-    const createSingleUseAction = vi.fn().mockResolvedValueOnce({ id: 'action-1' }).mockResolvedValueOnce(null);
+    const createRestrictedSingleUseAction = vi.fn()
+      .mockResolvedValueOnce({ action: { id: 'action-1' }, rejection: null })
+      .mockResolvedValueOnce({ action: null, rejection: 'DUPLICATE' });
     const sendText = vi.fn().mockResolvedValue({ ephemeral_message_id: 1 });
     const service = new NightActionService(
       { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
@@ -91,7 +93,7 @@ describe('NightActionService commissioner checks', () => {
         findByGameAndUserId: vi.fn().mockResolvedValue(doctor),
         listAlivePlayers: vi.fn().mockResolvedValue([doctor, firstTarget, secondTarget]),
       } as unknown as PlayerRepository,
-      { createSingleUseAction, upsertAction: vi.fn() } as unknown as NightActionRepository,
+      { createRestrictedSingleUseAction, upsertAction: vi.fn() } as unknown as NightActionRepository,
       { sendText } as unknown as TelegramEphemeralAdapter,
       createLogger({ logLevel: 'silent' }),
     );
@@ -102,7 +104,7 @@ describe('NightActionService commissioner checks', () => {
       message: 'Вы уже выбрали, кого спасать этой ночью.',
     }));
 
-    expect(createSingleUseAction).toHaveBeenCalledTimes(2);
+    expect(createRestrictedSingleUseAction).toHaveBeenCalledTimes(2);
     expect(sendText).toHaveBeenCalledTimes(1);
   });
 });
@@ -123,7 +125,11 @@ describe('NightActionService panel restoration', () => {
         findByGameAndUserId: vi.fn().mockImplementation(async (_gameId, userId) => players.find((player) => player.userId === userId) ?? null),
         listAlivePlayers: vi.fn().mockResolvedValue(players),
       } as unknown as PlayerRepository,
-      { listActions: vi.fn().mockResolvedValue([]) } as unknown as NightActionRepository,
+      {
+        listActions: vi.fn().mockResolvedValue([]),
+        getLatestTarget: vi.fn().mockResolvedValue(null),
+        hasDoctorUsedSelfSave: vi.fn().mockResolvedValue(false),
+      } as unknown as NightActionRepository,
       { sendText } as unknown as TelegramEphemeralAdapter,
       createLogger({ logLevel: 'silent' }),
     );

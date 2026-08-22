@@ -12,7 +12,7 @@ describe('environment configuration', () => {
   it('uses safe development defaults for optional settings', () => {
     expect(loadConfig(validEnvironment)).toMatchObject({
       logLevel: 'debug',
-      lobbyMaxPlayers: 20,
+      lobbyMaxPlayers: 15,
       roleConfirmationDurationSeconds: 300,
       dayDurationSeconds: 180,
       voteDurationSeconds: 90,

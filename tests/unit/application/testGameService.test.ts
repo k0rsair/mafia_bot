@@ -13,15 +13,15 @@ import { createLogger } from '../../../src/observability/logger.js';
 describe('TestGameService', () => {
   const game = { id: 'game-1', chatId: '-1001', phase: 'ROLE_CONFIRMATION', stateVersion: 7 } as Game;
   const humanPlayer = { id: 'human-1', userId: '101', displayName: 'Организатор', role: 'CIVILIAN', status: 'ALIVE' } as Player;
-  const virtualPlayers = [1, 2, 3, 4].map((number) => ({
+  const virtualPlayers = Array.from({ length: 8 }, (_, index) => index + 1).map((number) => ({
     id: `virtual-${number}`,
     userId: `test-player:${number}`,
     displayName: `🤖 Тестовый игрок ${number}`,
-    role: number === 1 ? 'MAFIA' : number === 2 ? 'COMMISSIONER' : 'CIVILIAN',
+    role: number === 1 ? 'MAFIA' : number === 2 ? 'DON' : number === 3 ? 'COMMISSIONER' : number === 4 ? 'MANIAC' : 'CIVILIAN',
     status: 'ALIVE',
   } as Player));
 
-  it('creates four virtual players and confirms only their roles', async () => {
+  it('creates eight virtual players for a nine-player city game and confirms only their roles', async () => {
     const createLobby = vi.fn().mockResolvedValue({ game });
     const joinLobby = vi.fn().mockResolvedValue({ game });
     const startGame = vi.fn().mockResolvedValue(game);
@@ -43,8 +43,8 @@ describe('TestGameService', () => {
       lobbyMessageId: 42,
     })).resolves.toEqual(game);
 
-    expect(joinLobby).toHaveBeenCalledTimes(4);
-    expect(confirmRole).toHaveBeenCalledTimes(4);
+    expect(joinLobby).toHaveBeenCalledTimes(8);
+    expect(confirmRole).toHaveBeenCalledTimes(8);
     expect(confirmRole).not.toHaveBeenCalledWith(game.id, humanPlayer.userId);
   });
 
@@ -58,7 +58,7 @@ describe('TestGameService', () => {
       {} as LobbyService,
       {} as GameService,
       { listAlivePlayers: vi.fn().mockResolvedValue([humanPlayer, ...virtualPlayers]) } as unknown as PlayerRepository,
-      { upsertMafiaDraft, confirmMafiaDraft, createSingleUseAction } as unknown as NightActionRepository,
+      { upsertMafiaDraft, confirmMafiaDraft, createSingleUseAction, getLatestTarget: vi.fn().mockResolvedValue(null) } as unknown as NightActionRepository,
       {} as VotingService,
       { completeNightIfAllActionsCompleted } as unknown as PhaseService,
       createLogger({ logLevel: 'silent' }),
@@ -73,30 +73,34 @@ describe('TestGameService', () => {
     }));
     expect(confirmMafiaDraft).toHaveBeenCalledWith(expect.objectContaining({ actorPlayerId: 'virtual-1' }));
     expect(createSingleUseAction).toHaveBeenCalledWith(expect.objectContaining({
-      actionType: 'COMMISSIONER_CHECK',
+      actionType: 'DON_CHECK',
       actorPlayerId: 'virtual-2',
+    }));
+    expect(createSingleUseAction).toHaveBeenCalledWith(expect.objectContaining({
+      actionType: 'COMMISSIONER_CHECK',
+      actorPlayerId: 'virtual-3',
     }));
     expect(completeNightIfAllActionsCompleted).toHaveBeenCalledWith(nightGame.id, nightGame.stateVersion);
   });
 
   it('casts a vote for every living virtual player while leaving the organiser manual', async () => {
     const voteGame = { ...game, phase: 'DAY_VOTE' } as Game;
-    const castVote = vi.fn().mockResolvedValue({ game: voteGame, votesCast: 4, votersTotal: 5, allVoted: false } satisfies VoteProgress);
+    const castVote = vi.fn().mockResolvedValue({ game: voteGame, votesCast: 8, votersTotal: 9, allVoted: false } satisfies VoteProgress);
     const service = new TestGameService(
       {} as LobbyService,
       {} as GameService,
       { listAlivePlayers: vi.fn().mockResolvedValue([humanPlayer, ...virtualPlayers]) } as unknown as PlayerRepository,
       {} as NightActionRepository,
-      { castVote } as unknown as VotingService,
+      { castVote, getVoteRoundOptions: vi.fn().mockResolvedValue({ kind: 'PRIMARY', candidatePlayerIds: [humanPlayer.id, ...virtualPlayers.map((player) => player.id)] }) } as unknown as VotingService,
       {} as PhaseService,
       createLogger({ logLevel: 'silent' }),
     );
 
     const progress = await service.castVirtualVotes(voteGame);
 
-    expect(castVote).toHaveBeenCalledTimes(4);
+    expect(castVote).toHaveBeenCalledTimes(8);
     expect(castVote).not.toHaveBeenCalledWith(expect.objectContaining({ userId: humanPlayer.userId }));
-    expect(progress).toMatchObject({ votesCast: 4, votersTotal: 5, allVoted: false });
+    expect(progress).toMatchObject({ votesCast: 8, votersTotal: 9, allVoted: false });
   });
 
   it('recognises only its own virtual player IDs', () => {

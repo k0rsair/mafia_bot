@@ -65,10 +65,12 @@ export class NightActionService {
     if (isMafiaFaction(player.role)) {
       await this.sendMafiaCouncilPanel(input, game, player);
       if (player.role === 'DON') {
+        const { callbackQueryId: ignoredCallbackQueryId, ...withoutCallbackQuery } = input;
+        const followUpInput = ignoredCallbackQueryId === undefined ? input : withoutCallbackQuery;
         if (await this.isPersonalActionBlocked(game, player)) {
-          await this.sendText(input, renderNightActionBlocked());
+          await this.sendText(followUpInput, renderNightActionBlocked());
         } else {
-          await this.sendDonCheckPanel(input, game, player);
+          await this.sendDonCheckPanel(followUpInput, game, player);
         }
       }
       return;
@@ -171,7 +173,7 @@ export class NightActionService {
       ? await this.nightActionRepository.createRestrictedSingleUseAction({ gameId: game.id, phaseVersion: game.stateVersion, actionType, actorPlayerId: player.id, targetPlayerId: target.id, rejectRepeatedTarget: true, rejectRepeatedSelfSave: actionType === 'DOCTOR_SAVE' })
       : await this.createSingleUseAction(game, player, target.id, actionType);
     if (action.action === null) {
-      throw new NightActionError(this.rejectionMessage(action.rejection));
+      throw new NightActionError(this.rejectionMessage(action.rejection, actionType));
     }
     if (actionType === 'COMMISSIONER_CHECK') {
       await this.sendInvestigationResult(input, renderCommissionerResult(target.displayName, isMafiaVisibleToSheriff(target.role as Role)));
@@ -188,9 +190,12 @@ export class NightActionService {
     return { action, rejection: action === null ? 'DUPLICATE' : null };
   }
 
-  private rejectionMessage(rejection: 'DUPLICATE' | 'REPEATED_TARGET' | 'SELF_SAVE_USED' | null): string {
+  private rejectionMessage(rejection: 'DUPLICATE' | 'REPEATED_TARGET' | 'SELF_SAVE_USED' | null, actionType: NightActionType): string {
     if (rejection === 'REPEATED_TARGET') return 'Эту же цель нельзя выбирать две ночи подряд.';
     if (rejection === 'SELF_SAVE_USED') return 'Самолечение доступно только один раз за игру.';
+    if (actionType === 'COMMISSIONER_CHECK') return 'Вы уже завершили проверку этой ночью.';
+    if (actionType === 'DOCTOR_SAVE') return 'Вы уже выбрали, кого спасать этой ночью.';
+    if (actionType === 'DON_CHECK') return 'Вы уже завершили проверку этой ночью.';
     return 'Вы уже завершили действие этой ночью.';
   }
 

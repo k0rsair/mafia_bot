@@ -9,6 +9,8 @@ describe('Telegram command menu', () => {
       'mafia',
       'startgame',
       'startvote',
+      'closenominations',
+      'closevote',
       'mafia_status',
       'roles_pending',
       'restore_panel',
@@ -25,7 +27,7 @@ describe('Telegram command menu', () => {
 
     await expect(registerCommandMenu({ setMyCommands }, createLogger({ logLevel: 'silent' }))).resolves.toBeUndefined();
 
-    expect(setMyCommands).toHaveBeenCalledWith(BOT_COMMANDS);
+    expect(setMyCommands).toHaveBeenCalledWith(BOT_COMMANDS, { scope: { type: 'all_group_chats' } });
   });
 
   it('adds the development test-game command only when enabled', () => {

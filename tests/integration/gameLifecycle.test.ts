@@ -28,7 +28,7 @@ describe.skipIf(testDatabaseUrl === undefined)('PostgreSQL game lifecycle', () =
 
   it('persists a single role-confirmation transition and durable deadline job', async () => {
     const game = await gameRepository.createLobby({ chatId, creatorId: 'creator-1', lobbyMessageId: 1 });
-    const userIds = Array.from({ length: 5 }, (_, index) => `user-${index + 1}`);
+    const userIds = Array.from({ length: 9 }, (_, index) => `user-${index + 1}`);
     for (const userId of userIds) {
       await playerRepository.joinLobby({ gameId: game.id, userId, displayName: userId });
     }

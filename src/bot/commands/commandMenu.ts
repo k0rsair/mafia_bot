@@ -1,4 +1,5 @@
 import type { BotCommand } from 'grammy/types';
+import type { BotCommandScopeAllGroupChats } from '@grammyjs/types/settings.js';
 
 import type { AppLogger } from '../../observability/logger.js';
 
@@ -18,20 +19,21 @@ export const BOT_COMMANDS: readonly BotCommand[] = [
 ];
 
 const TEST_GAME_COMMAND: BotCommand = { command: 'testgame', description: 'Запустить тест с ботами' };
+const GROUP_COMMAND_SCOPE: BotCommandScopeAllGroupChats = { type: 'all_group_chats' };
 
 export function getBotCommands(testGameEnabled: boolean): readonly BotCommand[] {
   return testGameEnabled ? [...BOT_COMMANDS, TEST_GAME_COMMAND] : BOT_COMMANDS;
 }
 
 export async function registerCommandMenu(
-  api: Readonly<{ setMyCommands(commands: readonly BotCommand[]): Promise<true> }>,
+  api: Readonly<{ setMyCommands(commands: readonly BotCommand[], other?: Readonly<{ scope: BotCommandScopeAllGroupChats }>): Promise<true> }>,
   logger: AppLogger,
   testGameEnabled: boolean = false,
 ): Promise<void> {
   const commands = getBotCommands(testGameEnabled);
   try {
-    await api.setMyCommands(commands);
-    logger.info({ commandCount: commands.length, testGameEnabled }, '[FIX:command-menu] Telegram command menu synchronised');
+    await api.setMyCommands(commands, { scope: GROUP_COMMAND_SCOPE });
+    logger.info({ commandCount: commands.length, testGameEnabled, commandScope: GROUP_COMMAND_SCOPE.type }, '[registerCommandMenu] Telegram group command menu synchronised');
   } catch (error) {
     logger.error({ commandCount: commands.length, testGameEnabled, error }, '[FIX:command-menu] Failed to synchronise Telegram command menu');
   }

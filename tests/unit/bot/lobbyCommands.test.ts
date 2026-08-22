@@ -49,7 +49,7 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
     ephemeralPanelService: { restorePanel, deliverRolePanels },
     ephemeralAdapter: { sendText },
     testGameService: { createTestGame },
-    config: { lobbyMaxPlayers: 20, testGameEnabled },
+    config: { lobbyMaxPlayers: 15, testGameEnabled },
     logger: createLogger({ logLevel: 'silent' }),
   } as never);
 
@@ -210,6 +210,6 @@ describe('role confirmation commands', () => {
     }));
     expect(handlers.recordControlMessage).toHaveBeenCalledWith('test-game', 1);
     expect(handlers.deliverRolePanels).toHaveBeenCalledWith(expect.objectContaining({ id: 'test-game' }));
-    expect(editMessageText).toHaveBeenCalledWith(-1001, 1, expect.stringContaining('Четыре виртуальных игрока уже подтвердили роли.'), expect.objectContaining({ reply_markup: expect.any(Object) }));
+    expect(editMessageText).toHaveBeenCalledWith(-1001, 1, expect.stringContaining('Восемь виртуальных игроков уже подтвердили роли.'), expect.objectContaining({ reply_markup: expect.any(Object) }));
   });
 });

@@ -119,6 +119,11 @@ async function publishRoleConfirmationCompletion(
   }
 
   if (result.nightGame.phase === 'NIGHT_PROSTITUTE') {
+    const regularNight = await testGameService.playVirtualProstituteAction(result.nightGame);
+    if (regularNight !== null) {
+      await publishRegularNightStart(context, regularNight, panelService, nightActionService, testGameService);
+      return;
+    }
     const view = renderProstituteNightControl();
     const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
     await panelService.recordControlMessage(result.nightGame.id, controlMessage.message_id);

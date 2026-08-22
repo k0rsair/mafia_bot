@@ -32,6 +32,11 @@ export type ResolvedVoteRound = Readonly<{
   voteDetails: readonly PublicVoteDetail[];
 }>;
 
+export type VoteRoundOptions = Readonly<{
+  kind: VoteRoundKind | null;
+  candidatePlayerIds: readonly string[];
+}>;
+
 export type AppliedVoteResolution = Readonly<{
   resolution: VoteResolution;
   roundKind?: VoteRoundKind;
@@ -124,6 +129,16 @@ export class VotingService {
     const candidates = round.candidatePlayerIds.filter((playerId) => nominatedIds.has(playerId));
     this.logger.info({ gameId, phaseVersion, nominatedCandidateCount: candidates.length }, '[VotingService.getNominatedCandidateIds] Nominations summarized');
     return candidates;
+  }
+
+  public async getVoteRoundOptions(gameId: string, phaseVersion: number): Promise<VoteRoundOptions> {
+    if (this.voteRoundRepository === undefined) {
+      return { kind: null, candidatePlayerIds: [] };
+    }
+    const round = await this.voteRoundRepository.findOpenRound(gameId, phaseVersion);
+    return round === null
+      ? { kind: null, candidatePlayerIds: [] }
+      : { kind: round.kind as VoteRoundKind, candidatePlayerIds: round.candidatePlayerIds };
   }
 
   public async getTiedCandidateIds(gameId: string, kind: Extract<VoteRoundKind, 'PRIMARY' | 'REVOTE'>): Promise<readonly string[]> {
