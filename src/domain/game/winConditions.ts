@@ -7,7 +7,7 @@ export function getWinningFaction(players: readonly AlivePlayer[]): WinningFacti
   const civilianCount = players.filter((player) => player.role === 'CIVILIAN').length;
   const peacefulCount = players.length - mafiaCount - maniacCount;
 
-  if (mafiaCount === 0 && maniacCount === 1 && civilianCount === 1 && players.length === 2) {
+  if (mafiaCount === 0 && maniacCount === 1 && (civilianCount === 1 || players.length === 1)) {
     return 'MANIAC';
   }
 

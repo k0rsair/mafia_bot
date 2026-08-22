@@ -32,30 +32,48 @@ export function registerVoteCallbacks(
     }
 
     try {
-      const progress = await votingService.castVote({
+      if (callback.action !== 'confirm') {
+        await votingService.castVote({
+          gameId: callback.gameId,
+          phaseVersion: callback.phaseVersion,
+          chatId: String(context.chat.id),
+          userId: String(context.from.id),
+          targetIndex: callback.targetIndex ?? null,
+          action: callback.action,
+        });
+        const currentGame = await phaseService.getCurrentGame(callback.gameId);
+        if (currentGame !== null && currentGame.stateVersion === callback.phaseVersion) {
+          const view = await dayService.renderVote(currentGame);
+          await context.editMessageText(view.text, { reply_markup: view.replyMarkup });
+        }
+        await context.answerCallbackQuery({ text: '📝 Выбор сохранён. Подтвердите его отдельной кнопкой.' });
+        return;
+      }
+
+      const progress = await votingService.confirmVote({
         gameId: callback.gameId,
         phaseVersion: callback.phaseVersion,
         chatId: String(context.chat.id),
         userId: String(context.from.id),
-        targetIndex: callback.targetIndex ?? null,
-        action: callback.action,
       });
       const view = await dayService.renderVote(progress.game);
-      const closesOnEveryVote = progress.game.phase !== 'DAY_NOMINATION';
-      if (!progress.allVoted || !closesOnEveryVote) {
+      if (!progress.allVoted) {
         await context.editMessageText(view.text, { reply_markup: view.replyMarkup });
-        await context.answerCallbackQuery({ text: '✅ Голос принят.' });
+        await context.answerCallbackQuery({ text: '✅ Выбор подтверждён.' });
         return;
       }
 
       const closure = await phaseService.closeDayVote(progress.game);
       if (closure === null) {
-        await context.editMessageText(view.text, { reply_markup: view.replyMarkup });
-        await context.answerCallbackQuery({ text: '✅ Голос принят.' });
+        const currentGame = await phaseService.getCurrentGame(callback.gameId);
+        if (currentGame !== null && currentGame.stateVersion === callback.phaseVersion) {
+          await context.editMessageText(view.text, { reply_markup: view.replyMarkup });
+        }
+        await context.answerCallbackQuery({ text: '✅ Выбор подтверждён.' });
         return;
       }
       await publishVoteClosure(context, closure, dayService, phaseService, nightActionService, testGameService, roleDisplayNames);
-      await context.answerCallbackQuery({ text: '✅ Голос принят.' });
+      await context.answerCallbackQuery({ text: '✅ Выбор подтверждён.' });
     } catch (error) {
       logger.warn({ gameId: callback.gameId, userId: String(context.from.id), error }, '[registerVoteCallbacks] Rejected vote callback');
       const text = error instanceof VotingError ? error.message : 'Не удалось принять голос. Попробуйте ещё раз.';
@@ -74,29 +92,29 @@ export async function publishVoteClosure(
   roleDisplayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES,
 ): Promise<void> {
   if (closure.kind === 'GAME_FINISHED') {
-    await closeVoteMessage(context, closure.voteResolution);
+    await closeVoteMessage(context, closure.game, closure.voteResolution);
     await context.reply(renderFinalView({ ...closure.finalization, roleDisplayNames }));
     return;
   }
   if (closure.kind === 'DAY_VOTE_STARTED') {
-    await context.editMessageText('📣 Номинации завершены. Начинается основное голосование.', { reply_markup: { inline_keyboard: [] } });
+    await replaceVoteMessage(context, closure.game, '📣 Номинации завершены. Начинается основное голосование.');
     await publishCurrentRound(context, closure.game, dayService, phaseService);
     return;
   }
   if (closure.kind === 'DAY_TIE_DISCUSSION_STARTED') {
-    await closeUnresolvedRoundMessage(context, closure.resolution);
+    await closeUnresolvedRoundMessage(context, closure.game, closure.resolution);
     await context.reply('🤝 Первый тур завершился ничьей. У города есть 30 секунд на обсуждение перед повторным голосованием.');
     await phaseService.recordControlMessage(closure.game.id, (await context.reply('⌛ Идёт обсуждение ничьей.')).message_id);
     return;
   }
   if (closure.kind === 'DAY_FINAL_DECISION_STARTED') {
-    await closeUnresolvedRoundMessage(context, closure.resolution);
+    await closeUnresolvedRoundMessage(context, closure.game, closure.resolution);
     await context.reply('⚖️ Повторное голосование снова завершилось ничьей. Город примет финальное решение.');
     await publishCurrentRound(context, closure.game, dayService, phaseService);
     return;
   }
 
-  await closeVoteMessage(context, closure.resolution);
+  await closeVoteMessage(context, closure.game, closure.resolution);
   await publishCityNightStart(context, closure.game, phaseService, nightActionService, testGameService, roleDisplayNames);
 }
 
@@ -145,19 +163,40 @@ async function publishCityNightStart(
   await nightActionService.deliverNightPanels(currentGame);
 }
 
-async function closeVoteMessage(context: Context, resolution: AppliedVoteResolution): Promise<void> {
-  await context.editMessageText(renderClosedVoteView({
+async function closeVoteMessage(context: Context, game: Readonly<{ chatId: string; controlMessageId: number | null }>, resolution: AppliedVoteResolution): Promise<void> {
+  await replaceVoteMessage(context, game, renderClosedVoteView({
     outcome: resolution.resolution.outcome,
     ...(resolution.roundKind === undefined ? {} : { kind: resolution.roundKind }),
     eliminatedDisplayNames: resolution.eliminatedPlayers.map((player) => player.displayName),
     alibiedDisplayNames: resolution.alibiedPlayers.map((player) => player.displayName),
     voteDetails: resolution.voteDetails,
-  }), { reply_markup: { inline_keyboard: [] } });
+  }));
 }
 
-async function closeUnresolvedRoundMessage(context: Context, resolution: ResolvedVoteRound): Promise<void> {
-  await context.editMessageText(renderClosedVoteView({
+async function closeUnresolvedRoundMessage(context: Context, game: Readonly<{ chatId: string; controlMessageId: number | null }>, resolution: ResolvedVoteRound): Promise<void> {
+  await replaceVoteMessage(context, game, renderClosedVoteView({
     outcome: resolution.resolution.outcome,
     voteDetails: resolution.voteDetails,
-  }), { reply_markup: { inline_keyboard: [] } });
+  }));
+}
+
+async function replaceVoteMessage(
+  context: Context,
+  game: Readonly<{ chatId: string; controlMessageId: number | null }>,
+  text: string,
+): Promise<void> {
+  const replyMarkup = { inline_keyboard: [] };
+  if (context.callbackQuery !== undefined) {
+    await context.editMessageText(text, { reply_markup: replyMarkup });
+    return;
+  }
+  if (game.controlMessageId !== null) {
+    try {
+      await context.api.editMessageText(game.chatId, game.controlMessageId, text, { reply_markup: replyMarkup });
+      return;
+    } catch {
+      // The phase has been committed already, so publish the replacement below.
+    }
+  }
+  await context.reply(text, { reply_markup: replyMarkup });
 }

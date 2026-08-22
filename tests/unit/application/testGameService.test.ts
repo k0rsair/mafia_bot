@@ -83,15 +83,43 @@ describe('TestGameService', () => {
     expect(completeNightIfAllActionsCompleted).toHaveBeenCalledWith(nightGame.id, nightGame.stateVersion);
   });
 
+  it('records a skip instead of leaving a virtual night blocked when no target exists', async () => {
+    const nightGame = { ...game, phase: 'NIGHT' } as Game;
+    const soloManiac = { id: 'virtual-maniac', userId: 'test-player:4', displayName: '🤖 Маньяк', role: 'MANIAC', status: 'ALIVE' } as Player;
+    const createSingleUseAction = vi.fn().mockResolvedValue({});
+    const completeNightIfAllActionsCompleted = vi.fn().mockResolvedValue(null);
+    const service = new TestGameService(
+      {} as LobbyService,
+      {} as GameService,
+      { listAlivePlayers: vi.fn().mockResolvedValue([soloManiac]) } as unknown as PlayerRepository,
+      { createSingleUseAction } as unknown as NightActionRepository,
+      {} as VotingService,
+      { completeNightIfAllActionsCompleted } as unknown as PhaseService,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await service.playVirtualNightActions(nightGame);
+
+    expect(createSingleUseAction).toHaveBeenCalledWith({
+      gameId: nightGame.id,
+      phaseVersion: nightGame.stateVersion,
+      actionType: 'MANIAC_SKIP',
+      actorPlayerId: soloManiac.id,
+      targetPlayerId: null,
+    });
+    expect(completeNightIfAllActionsCompleted).toHaveBeenCalledWith(nightGame.id, nightGame.stateVersion);
+  });
+
   it('casts a vote for every living virtual player while leaving the organiser manual', async () => {
     const voteGame = { ...game, phase: 'DAY_VOTE' } as Game;
     const castVote = vi.fn().mockResolvedValue({ game: voteGame, votesCast: 8, votersTotal: 9, allVoted: false } satisfies VoteProgress);
+    const confirmVote = vi.fn().mockResolvedValue({ game: voteGame, votesCast: 8, votersTotal: 9, allVoted: false } satisfies VoteProgress);
     const service = new TestGameService(
       {} as LobbyService,
       {} as GameService,
       { listAlivePlayers: vi.fn().mockResolvedValue([humanPlayer, ...virtualPlayers]) } as unknown as PlayerRepository,
       {} as NightActionRepository,
-      { castVote, getVoteRoundOptions: vi.fn().mockResolvedValue({ kind: 'PRIMARY', candidatePlayerIds: [humanPlayer.id, ...virtualPlayers.map((player) => player.id)] }) } as unknown as VotingService,
+      { castVote, confirmVote, getVoteRoundOptions: vi.fn().mockResolvedValue({ kind: 'PRIMARY', candidatePlayerIds: [humanPlayer.id, ...virtualPlayers.map((player) => player.id)] }) } as unknown as VotingService,
       {} as PhaseService,
       createLogger({ logLevel: 'silent' }),
     );
@@ -100,6 +128,8 @@ describe('TestGameService', () => {
 
     expect(castVote).toHaveBeenCalledTimes(8);
     expect(castVote).not.toHaveBeenCalledWith(expect.objectContaining({ userId: humanPlayer.userId }));
+    expect(confirmVote).toHaveBeenCalledTimes(8);
+    expect(confirmVote).not.toHaveBeenCalledWith(expect.objectContaining({ userId: humanPlayer.userId }));
     expect(progress).toMatchObject({ votesCast: 8, votersTotal: 9, allVoted: false });
   });
 

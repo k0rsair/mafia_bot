@@ -100,6 +100,18 @@ export class TestGameService {
         : null;
       const target = selectNightTarget(actor, alivePlayers, actionType, previousTargetId);
       if (target === undefined) {
+        if (actionType === 'MANIAC_KILL') {
+          await this.nightActionRepository.createSingleUseAction({
+            gameId: game.id,
+            phaseVersion: game.stateVersion,
+            actionType: 'MANIAC_SKIP',
+            actorPlayerId: actor.id,
+            targetPlayerId: null,
+          });
+          actionCount += 1;
+          this.logger.info({ gameId: game.id, phaseVersion: game.stateVersion, actionCount }, '[FIX:terminal-virtual-night] Virtual night action skipped without an eligible target');
+          continue;
+        }
         this.logger.warn({ gameId: game.id, phaseVersion: game.stateVersion }, '[TestGameService.playVirtualNightActions] No valid virtual night target');
         continue;
       }
@@ -210,11 +222,17 @@ export class TestGameService {
         targetIndex: target === undefined ? null : (options.kind === null ? alivePlayers.indexOf(target) : options.candidatePlayerIds.indexOf(target.id)),
         action: options.kind === 'FINAL_DECISION' ? 'all-stay' : 'candidate',
       });
+      progress = await this.votingService.confirmVote({
+        gameId: game.id,
+        phaseVersion: game.stateVersion,
+        chatId: game.chatId,
+        userId: voter.userId,
+      });
     }
 
     this.logger.info(
       { gameId: game.id, phaseVersion: game.stateVersion, virtualPlayerCount: virtualPlayers.length, votesCast: progress?.votesCast ?? 0 },
-      '[TestGameService.castVirtualVotes] Submitted virtual votes',
+      '[TestGameService.castVirtualVotes] Submitted and confirmed virtual votes',
     );
     return progress;
   }

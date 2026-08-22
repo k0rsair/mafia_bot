@@ -2,7 +2,7 @@ import type { InlineKeyboardMarkup } from 'grammy/types';
 
 import type { PublicVoteDetail } from '../../domain/game/voteDetails.js';
 import type { VoteRoundKind } from '../../domain/game/types.js';
-import { encodeFinalDecisionCallback, encodeVoteCallback } from '../callbacks/callbackData.js';
+import { encodeFinalDecisionCallback, encodeVoteCallback, encodeVoteConfirmationCallback } from '../callbacks/callbackData.js';
 
 export function renderVoteView(input: Readonly<{
   gameId: string;
@@ -26,16 +26,19 @@ export function renderVoteView(input: Readonly<{
       titleForRound(input.kind),
       '',
       promptForRound(input.kind),
-      `Голоса: ${input.votesCast}/${input.votersTotal}`,
+      `Подтверждено: ${input.votesCast}/${input.votersTotal}`,
       ...renderVoteDetails(input.voteDetails),
     ].join('\n'),
     replyMarkup: {
-      inline_keyboard: isFinalDecision
+      inline_keyboard: [
+        ...(isFinalDecision
         ? [[
           { text: '⚰️ Казнить всех кандидатов', callback_data: encodeFinalDecisionCallback(input.gameId, input.phaseVersion, 'all-leave') },
           { text: '🕊️ Оставить всех', callback_data: encodeFinalDecisionCallback(input.gameId, input.phaseVersion, 'all-stay') },
         ]]
-        : chunk(choices, 2),
+        : chunk(choices, 2)),
+        [{ text: '✅ Подтвердить мой выбор', callback_data: encodeVoteConfirmationCallback(input.gameId, input.phaseVersion) }],
+      ],
     },
   };
 }
@@ -100,10 +103,10 @@ function titleForRound(kind: VoteRoundKind): string {
 
 function promptForRound(kind: VoteRoundKind): string {
   switch (kind) {
-    case 'NOMINATION': return 'Номинируйте одного игрока. Организатор закроет этап номинаций.';
-    case 'PRIMARY': return 'Выберите одного из номинированных игроков. Пропуска нет.';
-    case 'REVOTE': return 'Выберите одного из кандидатов ничьей. Пропуска нет.';
-    case 'FINAL_DECISION': return 'Город выбирает: казнить всех кандидатов ничьей или оставить всех.';
+    case 'NOMINATION': return 'Номинируйте одного игрока, затем подтвердите свой выбор. После подтверждения всех раунд завершится сам.';
+    case 'PRIMARY': return 'Выберите одного из номинированных игроков, затем подтвердите свой выбор. Пропуска нет.';
+    case 'REVOTE': return 'Выберите одного из кандидатов ничьей, затем подтвердите свой выбор. Пропуска нет.';
+    case 'FINAL_DECISION': return 'Город выбирает: казнить всех кандидатов ничьей или оставить всех. Затем каждый подтверждает выбор.';
   }
 }
 

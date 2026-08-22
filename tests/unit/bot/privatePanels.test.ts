@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CallbackGuardError, CallbackGuardService } from '../../../src/application/CallbackGuardService.js';
-import { encodeGameCallback, encodeNightTargetCallback, encodeVoteCallback, parseGameCallback, parseVoteCallback } from '../../../src/bot/callbacks/callbackData.js';
+import { encodeGameCallback, encodeNightTargetCallback, encodeVoteCallback, encodeVoteConfirmationCallback, parseGameCallback, parseVoteCallback } from '../../../src/bot/callbacks/callbackData.js';
 import { TelegramEphemeralAdapter } from '../../../src/bot/telegram/ephemeral.js';
 import { renderNightPanel, renderRolePanel } from '../../../src/bot/views/ephemeralPanelView.js';
 import { renderRoleControl } from '../../../src/bot/views/phaseView.js';
@@ -73,6 +73,17 @@ describe('group-only private panels', () => {
       gameId: 'game-id',
       phaseVersion: 2,
       action: 'mafia-confirm',
+    });
+  });
+
+  it('supports a separate confirmation callback for a city vote draft', () => {
+    const callback = encodeVoteConfirmationCallback('game-id', 2);
+
+    expect(parseVoteCallback(callback)).toMatchObject({
+      kind: 'vote',
+      gameId: 'game-id',
+      phaseVersion: 2,
+      action: 'confirm',
     });
   });
 

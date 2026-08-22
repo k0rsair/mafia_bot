@@ -34,6 +34,8 @@ function createService(input: Readonly<{
       upsertVote,
       countVotesForRound: vi.fn().mockResolvedValue(1),
       countVotes: vi.fn().mockResolvedValue(1),
+      countConfirmedVotesForRound: vi.fn().mockResolvedValue(0),
+      countConfirmedVotes: vi.fn().mockResolvedValue(0),
     } as unknown as VoteRepository,
     createLogger({ logLevel: 'silent' }),
     undefined,
@@ -44,6 +46,59 @@ function createService(input: Readonly<{
 }
 
 describe('VotingService city rounds', () => {
+  it('counts only confirmed city choices and requires a saved draft before confirmation', async () => {
+    const round = { id: 'round-1', kind: 'NOMINATION', candidatePlayerIds: [alice.id, boris.id, vera.id] } as VoteRound;
+    const confirmVote = vi.fn().mockResolvedValue(true);
+    const countConfirmedVotesForRound = vi.fn().mockResolvedValue(3);
+    const service = new VotingService(
+      { findById: vi.fn().mockResolvedValue({ ...game, phase: 'DAY_NOMINATION' }) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockResolvedValue(alice),
+        listAlivePlayers: vi.fn().mockResolvedValue([alice, boris, vera]),
+      } as unknown as PlayerRepository,
+      { confirmVote, countConfirmedVotesForRound } as unknown as VoteRepository,
+      createLogger({ logLevel: 'silent' }),
+      undefined,
+      { findOpenRound: vi.fn().mockResolvedValue(round) } as unknown as VoteRoundRepository,
+    );
+
+    await expect(service.confirmVote({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      chatId: game.chatId,
+      userId: alice.userId,
+    })).resolves.toMatchObject({ votesCast: 3, votersTotal: 3, allVoted: true, roundKind: 'NOMINATION' });
+
+    expect(confirmVote).toHaveBeenCalledWith({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      voterPlayerId: alice.id,
+      voteRoundId: round.id,
+    });
+  });
+
+  it('rejects confirmation when the player has not saved a draft', async () => {
+    const round = { id: 'round-1', kind: 'PRIMARY', candidatePlayerIds: [boris.id, vera.id] } as VoteRound;
+    const service = new VotingService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockResolvedValue(alice),
+        listAlivePlayers: vi.fn().mockResolvedValue([alice, boris, vera]),
+      } as unknown as PlayerRepository,
+      { confirmVote: vi.fn().mockResolvedValue(false) } as unknown as VoteRepository,
+      createLogger({ logLevel: 'silent' }),
+      undefined,
+      { findOpenRound: vi.fn().mockResolvedValue(round) } as unknown as VoteRoundRepository,
+    );
+
+    await expect(service.confirmVote({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      chatId: game.chatId,
+      userId: alice.userId,
+    })).rejects.toThrow('Сначала выберите вариант');
+  });
+
   it('resolves a candidate button against the persisted round order rather than the live player order', async () => {
     const round = { id: 'round-1', kind: 'PRIMARY', candidatePlayerIds: [vera.id, boris.id] } as VoteRound;
     const { service, upsertVote } = createService({ round });

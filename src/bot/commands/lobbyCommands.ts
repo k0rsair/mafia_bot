@@ -368,6 +368,7 @@ async function closeCityRoundFromContext(
     await context.reply('⚠️ Фаза уже изменилась. Проверьте /mafia_status.');
     return;
   }
+  dependencies.logger.info({ gameId: closure.game.id, chatId: closure.game.chatId, closureKind: closure.kind }, '[FIX:city-vote-publication] Publishing city round after command closure');
   await publishVoteClosure(
     context,
     closure,

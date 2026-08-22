@@ -62,7 +62,7 @@ describe('PhaseService early night completion', () => {
         resolve,
       } as unknown as NightResolutionService,
       {} as VotingService,
-      {} as GameFinalizationService,
+      { finalizeIfWinner: vi.fn().mockResolvedValue(null) } as unknown as GameFinalizationService,
       config,
       createLogger({ logLevel: 'silent' }),
     );
@@ -71,6 +71,29 @@ describe('PhaseService early night completion', () => {
 
     expect(resolve).not.toHaveBeenCalled();
     expect(transitionPhase).not.toHaveBeenCalled();
+  });
+
+  it('finishes a terminal night before waiting for an action with no eligible target', async () => {
+    const game = { id: 'game-1', phase: 'NIGHT', stateVersion: 7, status: 'RUNNING' } as Game;
+    const finishedGame = { ...game, phase: 'FINISHED', status: 'FINISHED', stateVersion: 8 } as Game;
+    const finalizeIfWinner = vi.fn().mockResolvedValue({ game: finishedGame, winningFaction: 'MANIAC', players: [] });
+    const getActionProgress = vi.fn();
+    const service = new PhaseService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      { getActionProgress } as unknown as NightResolutionService,
+      {} as VotingService,
+      { finalizeIfWinner } as unknown as GameFinalizationService,
+      config,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await expect(service.completeNightIfAllActionsCompleted(game.id, game.stateVersion)).resolves.toMatchObject({
+      kind: 'GAME_FINISHED',
+      game: finishedGame,
+    });
+
+    expect(finalizeIfWinner).toHaveBeenCalledWith(game);
+    expect(getActionProgress).not.toHaveBeenCalled();
   });
 });
 
@@ -136,9 +159,11 @@ describe('PhaseService city vote closure', () => {
     const nominationGame = { id: 'game-1', phase: 'DAY_NOMINATION', stateVersion: 7 } as Game;
     const primaryGame = { ...nominationGame, phase: 'DAY_VOTE', stateVersion: 8 } as Game;
     const startPrimaryVote = vi.fn().mockResolvedValue(primaryGame);
+    const round = { id: 'round-1', kind: 'NOMINATION', sequence: 1 } as never;
     const votingService = {
+      getActiveVoteRound: vi.fn().mockResolvedValue(round),
       getNominatedCandidateIds: vi.fn().mockResolvedValue(['player-3', 'player-2']),
-      closeCurrentRound: vi.fn().mockResolvedValue(undefined),
+      closeCurrentRound: vi.fn().mockResolvedValue(true),
     } as unknown as VotingService;
     const service = new PhaseService(
       {} as GameRepository,
@@ -148,7 +173,7 @@ describe('PhaseService city vote closure', () => {
       config,
       createLogger({ logLevel: 'silent' }),
       undefined,
-      { getActiveRound: vi.fn().mockResolvedValue({ round: { id: 'round-1' }, voteDetails: [] }), startPrimaryVote } as never,
+      { getActiveRound: vi.fn().mockResolvedValue({ round, voteDetails: [] }), startPrimaryVote } as never,
     );
 
     await expect(service.closeDayVote(nominationGame)).resolves.toEqual({ game: primaryGame, kind: 'DAY_VOTE_STARTED' });
@@ -168,7 +193,7 @@ describe('PhaseService city vote closure', () => {
     const service = new PhaseService(
       { transitionPhase } as unknown as GameRepository,
       {} as NightResolutionService,
-      { resolveVote: vi.fn().mockResolvedValue(resolution), closeCurrentRound: vi.fn().mockResolvedValue(undefined) } as unknown as VotingService,
+      { getActiveVoteRound: vi.fn().mockResolvedValue(resolution.round), resolveVote: vi.fn().mockResolvedValue(resolution), closeCurrentRound: vi.fn().mockResolvedValue(true) } as unknown as VotingService,
       {} as GameFinalizationService,
       config,
       createLogger({ logLevel: 'silent' }),
@@ -191,7 +216,7 @@ describe('PhaseService city vote closure', () => {
     const service = new PhaseService(
       {} as GameRepository,
       {} as NightResolutionService,
-      { resolveVote: vi.fn().mockResolvedValue(resolution), closeCurrentRound: vi.fn().mockResolvedValue(undefined) } as unknown as VotingService,
+      { getActiveVoteRound: vi.fn().mockResolvedValue(resolution.round), resolveVote: vi.fn().mockResolvedValue(resolution), closeCurrentRound: vi.fn().mockResolvedValue(true) } as unknown as VotingService,
       {} as GameFinalizationService,
       config,
       createLogger({ logLevel: 'silent' }),
@@ -202,5 +227,26 @@ describe('PhaseService city vote closure', () => {
     await expect(service.closeDayVote(revoteGame)).resolves.toEqual({ game: finalGame, kind: 'DAY_FINAL_DECISION_STARTED', resolution });
 
     expect(startFinalDecision).toHaveBeenCalledWith(revoteGame, ['player-2', 'player-3'], config.voteDurationSeconds);
+  });
+
+  it('does not apply a vote outcome when another callback already claimed the round', async () => {
+    const voteGame = { id: 'game-1', phase: 'DAY_VOTE', stateVersion: 7 } as Game;
+    const resolveVote = vi.fn();
+    const service = new PhaseService(
+      {} as GameRepository,
+      {} as NightResolutionService,
+      {
+        getActiveVoteRound: vi.fn().mockResolvedValue({ id: 'round-1', kind: 'PRIMARY', sequence: 2 }),
+        closeCurrentRound: vi.fn().mockResolvedValue(false),
+        resolveVote,
+      } as unknown as VotingService,
+      {} as GameFinalizationService,
+      config,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await expect(service.closeDayVote(voteGame)).resolves.toBeNull();
+
+    expect(resolveVote).not.toHaveBeenCalled();
   });
 });

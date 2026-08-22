@@ -14,7 +14,7 @@ export type VoteCallback = Readonly<{
   kind: 'vote';
   gameId: string;
   phaseVersion: number;
-  action: 'candidate' | 'all-leave' | 'all-stay';
+  action: 'candidate' | 'confirm' | 'all-leave' | 'all-stay';
   targetIndex?: number;
 }>;
 
@@ -89,6 +89,10 @@ export function encodeFinalDecisionCallback(gameId: string, phaseVersion: number
   return `v:${gameId}:${phaseVersion.toString(36)}:${action}`;
 }
 
+export function encodeVoteConfirmationCallback(gameId: string, phaseVersion: number): string {
+  return `v:${gameId}:${phaseVersion.toString(36)}:confirm`;
+}
+
 export function parseVoteCallback(value: string): VoteCallback | null {
   const [kind, gameId, phaseVersionValue, action, targetIndexValue, extra] = value.split(':');
   const phaseVersion = phaseVersionValue === undefined ? Number.NaN : Number.parseInt(phaseVersionValue, 36);
@@ -100,7 +104,7 @@ export function parseVoteCallback(value: string): VoteCallback | null {
   if (action === 'candidate' && targetIndex !== null && targetIndex !== undefined) {
     return { kind: 'vote', gameId, phaseVersion, action, targetIndex };
   }
-  if ((action === 'all-leave' || action === 'all-stay') && targetIndexValue === undefined) {
+  if ((action === 'confirm' || action === 'all-leave' || action === 'all-stay') && targetIndexValue === undefined) {
     return { kind: 'vote', gameId, phaseVersion, action };
   }
 

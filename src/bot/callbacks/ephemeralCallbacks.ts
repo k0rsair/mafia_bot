@@ -167,6 +167,11 @@ export async function publishNightCompletion(
     return;
   }
 
+  if (completion.kind === 'GAME_FINISHED' && completion.nightResolution === undefined) {
+    await context.reply(renderFinalView({ ...completion.finalization, roleDisplayNames }));
+    return;
+  }
+
   const resolution = completion.kind === 'GAME_FINISHED' ? completion.nightResolution : completion.resolution;
   if (resolution === undefined) {
     return;

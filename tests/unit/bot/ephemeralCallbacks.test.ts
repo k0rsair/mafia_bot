@@ -2,7 +2,7 @@ import type { Game } from '@prisma/client';
 import type { Bot, Context } from 'grammy';
 import { describe, expect, it, vi } from 'vitest';
 
-import { registerEphemeralCallbacks } from '../../../src/bot/callbacks/ephemeralCallbacks.js';
+import { publishNightCompletion, registerEphemeralCallbacks } from '../../../src/bot/callbacks/ephemeralCallbacks.js';
 import { encodeGameCallback, encodeNightTargetCallback } from '../../../src/bot/callbacks/callbackData.js';
 import { createLogger } from '../../../src/observability/logger.js';
 
@@ -108,5 +108,18 @@ describe('ephemeral role-panel callbacks', () => {
     });
     expect(completeNightIfAllActionsCompleted).toHaveBeenCalledWith('game-1', 7);
     expect(answerCallbackQuery).toHaveBeenCalledWith({ text: '✅ Выбор принят.' });
+  });
+
+  it('publishes the final reveal when a terminal night has no resolution to narrate', async () => {
+    const reply = vi.fn().mockResolvedValue({ message_id: 42 });
+    const finishedGame = { id: 'game-1', chatId: '-1001', phase: 'FINISHED', stateVersion: 8 } as Game;
+
+    await publishNightCompletion({ reply } as unknown as Context, {
+      kind: 'GAME_FINISHED',
+      game: finishedGame,
+      finalization: { game: finishedGame, winningFaction: 'MANIAC', players: [] },
+    });
+
+    expect(reply).toHaveBeenCalledWith(expect.stringContaining('🏁 Игра завершена'));
   });
 });

@@ -149,6 +149,15 @@ export class PhaseService {
       return null;
     }
 
+    const finalization = await this.gameFinalizationService.finalizeIfWinner(game);
+    if (finalization !== null) {
+      this.logger.info(
+        { gameId: finalization.game.id, phase: game.phase, phaseVersion: game.stateVersion, winningFaction: finalization.winningFaction },
+        '[FIX:terminal-night] Finished terminal game before waiting for night actions',
+      );
+      return { game: finalization.game, kind: 'GAME_FINISHED', finalization };
+    }
+
     const progress = await this.nightResolutionService.getActionProgress(game.id, game.stateVersion);
     if (!progress.allActionsCompleted) {
       this.logger.debug({ gameId: game.id, phaseVersion: game.stateVersion, ...progress }, '[FIX:early-night-completion] Waiting for remaining night actions');
@@ -217,23 +226,33 @@ export class PhaseService {
     }
 
     if (game.phase === 'DAY_NOMINATION') {
-      const activeRound = await this.dayService?.getActiveRound(game) ?? null;
-      const nominatedCandidateIds = await this.votingService.getNominatedCandidateIds(game.id, game.stateVersion);
-      await this.votingService.closeCurrentRound(game.id, game.stateVersion, activeRound?.round ?? null);
+      const activeRound = await this.votingService.getActiveVoteRound(game.id, game.stateVersion);
+      const nominationView = await this.dayService?.getActiveRound(game) ?? null;
+      const claimed = await this.votingService.closeCurrentRound(game.id, game.stateVersion, activeRound);
+      if (!claimed) {
+        this.logger.debug({ gameId: game.id, phaseVersion: game.stateVersion }, '[FIX:confirmed-city-vote] Nomination round was already claimed for closure');
+        return null;
+      }
+      const nominatedCandidateIds = await this.votingService.getNominatedCandidateIds(game.id, game.stateVersion, activeRound);
       if (nominatedCandidateIds.length >= 2) {
         const nextGame = await this.startPrimaryVote(game, nominatedCandidateIds);
         return nextGame === null ? null : { game: nextGame, kind: 'DAY_VOTE_STARTED' };
       }
       const resolution = await this.votingService.applyDayOutcome(game.id, {
-        round: activeRound?.round ?? null,
+        round: activeRound,
         resolution: resolveVote([]),
-        voteDetails: activeRound?.voteDetails ?? [],
+        voteDetails: nominationView?.voteDetails ?? [],
       });
       return this.finishCityDay(game, resolution);
     }
 
-    const resolution = await this.votingService.resolveVote(game.id, game.stateVersion);
-    await this.votingService.closeCurrentRound(game.id, game.stateVersion, resolution.round);
+    const activeRound = await this.votingService.getActiveVoteRound(game.id, game.stateVersion);
+    const claimed = await this.votingService.closeCurrentRound(game.id, game.stateVersion, activeRound);
+    if (!claimed) {
+      this.logger.debug({ gameId: game.id, phaseVersion: game.stateVersion }, '[FIX:confirmed-city-vote] City vote round was already claimed for closure');
+      return null;
+    }
+    const resolution = await this.votingService.resolveVote(game.id, game.stateVersion, activeRound);
     if (resolution.resolution.outcome === 'TIE' && resolution.resolution.tiedPlayerIds.length >= 2) {
       if (game.phase === 'DAY_VOTE') {
         const nextGame = await this.startTieDiscussion(game);
