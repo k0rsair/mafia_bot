@@ -110,6 +110,11 @@ export class LobbyService {
     return this.gameRepository.findActiveByChatId(chatId);
   }
 
+  public async recordLobbyMessage(gameId: string, messageId: number): Promise<void> {
+    await this.gameRepository.setLobbyMessageId(gameId, messageId);
+    this.logger.debug({ gameId, messageId }, '[LobbyService.recordLobbyMessage] Stored lobby control message');
+  }
+
   public async listUnconfirmedRolePlayers(gameId: string): Promise<UnconfirmedRolePlayer[]> {
     this.logger.debug({ gameId }, '[LobbyService.listUnconfirmedRolePlayers] Checking role confirmation phase');
     const game = await this.gameRepository.findById(gameId);

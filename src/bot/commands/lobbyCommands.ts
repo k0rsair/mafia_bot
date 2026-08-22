@@ -81,7 +81,13 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
       return;
     }
 
-    await context.reply(renderLobby({ gameId: lobby.game.id, players: lobby.players, maxPlayers: dependencies.config.lobbyMaxPlayers }).text);
+    const view = renderLobby({ gameId: lobby.game.id, players: lobby.players, maxPlayers: dependencies.config.lobbyMaxPlayers });
+    const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
+    await dependencies.lobbyService.recordLobbyMessage(lobby.game.id, controlMessage.message_id);
+    dependencies.logger.info(
+      { gameId: lobby.game.id, phase: lobby.game.phase, playerCount: lobby.players.length },
+      '[FIX:lobby-status-control] Republished lobby control with buttons',
+    );
   });
 
   bot.command('testgame', async (context) => {

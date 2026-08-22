@@ -122,6 +122,11 @@ export class GameRepository {
     await this.prisma.game.update({ where: { id: gameId }, data: { controlMessageId } });
   }
 
+  public async setLobbyMessageId(gameId: string, lobbyMessageId: number): Promise<void> {
+    this.logger.debug({ gameId, lobbyMessageId }, '[GameRepository.setLobbyMessageId] Saving lobby control message reference');
+    await this.prisma.game.update({ where: { id: gameId }, data: { lobbyMessageId } });
+  }
+
   public async startRoleConfirmation(input: StartRoleConfirmationInput): Promise<Game | null> {
     this.logger.debug(
       { gameId: input.gameId, stateVersion: input.currentVersion, playerCount: input.assignments.length },

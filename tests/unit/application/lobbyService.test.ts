@@ -33,4 +33,17 @@ describe('LobbyService role confirmation status', () => {
 
     expect(listUnconfirmedRolePlayers).not.toHaveBeenCalled();
   });
+
+  it('records the latest lobby control message id', async () => {
+    const setLobbyMessageId = vi.fn().mockResolvedValue(undefined);
+    const service = new LobbyService(
+      { setLobbyMessageId } as unknown as GameRepository,
+      {} as PlayerRepository,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await service.recordLobbyMessage('game-1', 42);
+
+    expect(setLobbyMessageId).toHaveBeenCalledWith('game-1', 42);
+  });
 });
