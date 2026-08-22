@@ -72,14 +72,6 @@ export class VoteRepository {
     return this.prisma.vote.findMany({ where: { gameId, phaseVersion } });
   }
 
-  public async findVote(input: Readonly<{ gameId: string; phaseVersion: number; voterPlayerId: string }>): Promise<Vote | null> {
-    return this.prisma.vote.findUnique({
-      where: {
-        gameId_phaseVersion_voterPlayerId: input,
-      },
-    });
-  }
-
   public async countVotes(gameId: string, phaseVersion: number): Promise<number> {
     return this.prisma.vote.count({ where: { gameId, phaseVersion } });
   }

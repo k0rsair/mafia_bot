@@ -6,7 +6,6 @@ import type { GameFinalizationService } from '../../application/GameFinalization
 import type { PhaseService } from '../../application/PhaseService.js';
 import type { DayService } from '../../application/DayService.js';
 import type { VotingService } from '../../application/VotingService.js';
-import type { VotePanelService } from '../../application/VotePanelService.js';
 import { LobbyError, type LobbyService, type LobbySnapshot } from '../../application/LobbyService.js';
 import { NightActionError, type NightActionService } from '../../application/NightActionService.js';
 import type { TestGameService } from '../../application/TestGameService.js';
@@ -31,7 +30,6 @@ type LobbyHandlerDependencies = Readonly<{
   nightActionService: NightActionService;
   ephemeralAdapter: TelegramEphemeralAdapter;
   testGameService: TestGameService;
-  votePanelService: VotePanelService;
   config: Pick<AppConfig, 'lobbyMaxPlayers' | 'testGameEnabled' | 'roleDisplayNames'>;
   logger: AppLogger;
 }>;
@@ -172,16 +170,11 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
     }
 
     try {
-      const panelInput = {
+      await dependencies.ephemeralPanelService.restorePanel({
         gameId: game.id,
         chatId: String(context.chat.id),
         userId: String(context.from.id),
-      };
-      if (['DAY_NOMINATION', 'DAY_VOTE', 'DAY_REVOTE', 'DAY_FINAL_DECISION'].includes(game.phase)) {
-        await dependencies.votePanelService.restorePanel({ ...panelInput, phaseVersion: game.stateVersion });
-      } else {
-        await dependencies.ephemeralPanelService.restorePanel(panelInput);
-      }
+      });
       dependencies.logger.info({ gameId: game.id, chatId: game.chatId, phase: game.phase }, '[registerLobbyHandlers.restorePanel] Restored personal panel');
     } catch (error) {
       dependencies.logger.warn({ gameId: game.id, chatId: game.chatId, phase: game.phase, error }, '[registerLobbyHandlers.restorePanel] Panel restoration rejected');
@@ -220,7 +213,6 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
     const view = await dependencies.dayService.renderVote(voteGame);
     const controlMessage = await context.reply(`📣 Организатор завершил обсуждение. Начинаются номинации!\n\n${view.text}`, { reply_markup: view.replyMarkup });
     await dependencies.phaseService.recordControlMessage(voteGame.id, controlMessage.message_id);
-    await dependencies.votePanelService.deliverVotePanels(voteGame);
   });
 
   bot.command('closenominations', async (context) => {
@@ -382,7 +374,6 @@ async function closeCityRoundFromContext(
     closure,
     dependencies.dayService,
     dependencies.phaseService,
-    dependencies.votePanelService,
     dependencies.nightActionService,
     dependencies.testGameService,
     dependencies.config.roleDisplayNames,

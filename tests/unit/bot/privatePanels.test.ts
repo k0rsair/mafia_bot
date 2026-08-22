@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { CallbackGuardError, CallbackGuardService } from '../../../src/application/CallbackGuardService.js';
-import { encodeGameCallback, encodeNightTargetCallback, encodeVoteCallback, encodeVoteConfirmationCallback, encodeVotePanelCallback, parseGameCallback, parseVoteCallback } from '../../../src/bot/callbacks/callbackData.js';
+import { encodeGameCallback, encodeNightTargetCallback, encodeVoteCallback, encodeVoteConfirmationCallback, parseGameCallback, parseVoteCallback } from '../../../src/bot/callbacks/callbackData.js';
 import { TelegramEphemeralAdapter } from '../../../src/bot/telegram/ephemeral.js';
-import { renderCityVotePanel, renderNightPanel, renderRolePanel } from '../../../src/bot/views/ephemeralPanelView.js';
+import { renderNightPanel, renderRolePanel } from '../../../src/bot/views/ephemeralPanelView.js';
 import { renderRoleControl } from '../../../src/bot/views/phaseView.js';
 import { createLogger } from '../../../src/observability/logger.js';
 
@@ -85,46 +85,6 @@ describe('group-only private panels', () => {
       phaseVersion: 2,
       action: 'confirm',
     });
-  });
-
-  it('opens a personal city vote panel from the neutral group control', () => {
-    const callback = encodeVotePanelCallback('game-id', 2);
-
-    expect(parseVoteCallback(callback)).toMatchObject({ action: 'panel', phaseVersion: 2 });
-  });
-
-  it('shows a personal city-vote draft and clears its buttons after confirmation', () => {
-    const initialPanel = renderCityVotePanel({
-      gameId: 'game-id',
-      phaseVersion: 2,
-      kind: 'PRIMARY',
-      candidates: [{ displayName: 'Борис', targetIndex: 0 }],
-      selectedChoice: null,
-      confirmed: false,
-    });
-    const draftPanel = renderCityVotePanel({
-      gameId: 'game-id',
-      phaseVersion: 2,
-      kind: 'PRIMARY',
-      candidates: [{ displayName: 'Борис', targetIndex: 0 }],
-      selectedChoice: 'Борис',
-      confirmed: false,
-    });
-    const confirmedPanel = renderCityVotePanel({
-      gameId: 'game-id',
-      phaseVersion: 2,
-      kind: 'PRIMARY',
-      candidates: [{ displayName: 'Борис', targetIndex: 0 }],
-      selectedChoice: 'Борис',
-      confirmed: true,
-    });
-
-    expect(initialPanel.text).toContain('Ваш выбор: —');
-    expect(initialPanel.replyMarkup.inline_keyboard).toHaveLength(1);
-    expect(draftPanel.text).toContain('Ваш выбор: Борис ⏳');
-    expect(JSON.stringify(draftPanel.replyMarkup)).toContain(':confirm');
-    expect(confirmedPanel.text).toContain('Ваш выбор: Борис ✅');
-    expect(confirmedPanel.replyMarkup.inline_keyboard).toEqual([]);
   });
 
   it('does not render a second confirmation control after showing a role', () => {
