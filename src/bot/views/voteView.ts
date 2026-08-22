@@ -2,7 +2,7 @@ import type { InlineKeyboardMarkup } from 'grammy/types';
 
 import type { PublicVoteDetail } from '../../domain/game/voteDetails.js';
 import type { VoteRoundKind } from '../../domain/game/types.js';
-import { encodeFinalDecisionCallback, encodeVoteCallback, encodeVoteConfirmationCallback } from '../callbacks/callbackData.js';
+import { encodeVotePanelCallback } from '../callbacks/callbackData.js';
 
 export function renderVoteView(input: Readonly<{
   gameId: string;
@@ -13,14 +13,6 @@ export function renderVoteView(input: Readonly<{
   votersTotal: number;
   voteDetails: readonly PublicVoteDetail[];
 }>): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
-  const choices = input.candidates.map((candidate, targetIndex) =>
-    ({
-      text: candidate.displayName.slice(0, 48),
-      callback_data: encodeVoteCallback(input.gameId, input.phaseVersion, targetIndex),
-    }),
-  );
-
-  const isFinalDecision = input.kind === 'FINAL_DECISION';
   return {
     text: [
       titleForRound(input.kind),
@@ -30,15 +22,7 @@ export function renderVoteView(input: Readonly<{
       ...renderVoteDetails(input.voteDetails),
     ].join('\n'),
     replyMarkup: {
-      inline_keyboard: [
-        ...(isFinalDecision
-        ? [[
-          { text: '⚰️ Казнить всех кандидатов', callback_data: encodeFinalDecisionCallback(input.gameId, input.phaseVersion, 'all-leave') },
-          { text: '🕊️ Оставить всех', callback_data: encodeFinalDecisionCallback(input.gameId, input.phaseVersion, 'all-stay') },
-        ]]
-        : chunk(choices, 2)),
-        [{ text: '✅ Подтвердить мой выбор', callback_data: encodeVoteConfirmationCallback(input.gameId, input.phaseVersion) }],
-      ],
+      inline_keyboard: [[{ text: '🗳️ Открыть моё голосование', callback_data: encodeVotePanelCallback(input.gameId, input.phaseVersion) }]],
     },
   };
 }
@@ -88,7 +72,7 @@ function renderVoteDetails(voteDetails: readonly PublicVoteDetail[]): string[] {
     return [];
   }
   return ['', 'Кто за кого:', ...voteDetails.map((vote) =>
-    `• ${vote.voterDisplayName} → ${vote.targetDisplayName ?? 'пропуск'}`,
+    `• ${vote.voterDisplayName} → ${vote.targetDisplayName ?? 'пропуск'} ✅`,
   )];
 }
 
@@ -103,22 +87,14 @@ function titleForRound(kind: VoteRoundKind): string {
 
 function promptForRound(kind: VoteRoundKind): string {
   switch (kind) {
-    case 'NOMINATION': return 'Номинируйте одного игрока, затем подтвердите свой выбор. После подтверждения всех раунд завершится сам.';
-    case 'PRIMARY': return 'Выберите одного из номинированных игроков, затем подтвердите свой выбор. Пропуска нет.';
-    case 'REVOTE': return 'Выберите одного из кандидатов ничьей, затем подтвердите свой выбор. Пропуска нет.';
-    case 'FINAL_DECISION': return 'Город выбирает: казнить всех кандидатов ничьей или оставить всех. Затем каждый подтверждает выбор.';
+    case 'NOMINATION': return 'Откройте личную панель, номинируйте игрока и подтвердите выбор. После подтверждения всех раунд завершится сам.';
+    case 'PRIMARY': return 'Откройте личную панель, выберите номинанта и подтвердите выбор. Пропуска нет.';
+    case 'REVOTE': return 'Откройте личную панель, выберите кандидата ничьей и подтвердите выбор. Пропуска нет.';
+    case 'FINAL_DECISION': return 'Откройте личную панель и выберите: казнить всех кандидатов ничьей или оставить всех. Затем подтвердите выбор.';
   }
 }
 
 function joinNames(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? 'игрок';
   return `${names.slice(0, -1).join(', ')} и ${names[names.length - 1]}`;
-}
-
-function chunk<T>(items: readonly T[], size: number): T[][] {
-  const rows: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    rows.push(items.slice(index, index + size));
-  }
-  return rows;
 }

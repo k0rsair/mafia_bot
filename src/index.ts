@@ -9,6 +9,7 @@ import { PhaseService, type PhaseDeadlineResult } from './application/PhaseServi
 import { NightActionService } from './application/NightActionService.js';
 import { NightResolutionService } from './application/NightResolutionService.js';
 import { DayService } from './application/DayService.js';
+import { VotePanelService } from './application/VotePanelService.js';
 import { VotingService, type AppliedVoteResolution } from './application/VotingService.js';
 import { GameFinalizationService } from './application/GameFinalizationService.js';
 import { RecoveryService } from './application/RecoveryService.js';
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
   const phaseService = new PhaseService(gameRepository, nightResolutionService, votingService, gameFinalizationService, config, logger, playerRepository, dayService);
   const testGameService = new TestGameService(lobbyService, gameService, playerRepository, nightActionRepository, votingService, phaseService, logger);
   const ephemeralAdapter = new TelegramEphemeralAdapter(config.botToken, logger);
+  const votePanelService = new VotePanelService(votingService, playerRepository, ephemeralAdapter, logger);
   const nightActionService = new NightActionService(gameRepository, playerRepository, nightActionRepository, ephemeralAdapter, logger, undefined, config.roleDisplayNames);
   const ephemeralPanelService = new EphemeralPanelService(gameRepository, playerRepository, phaseService, nightActionService, ephemeralAdapter, logger, undefined, config.roleDisplayNames);
   const bot = createBot(config, logger, {
@@ -62,6 +64,7 @@ async function main(): Promise<void> {
     dayService,
     phaseService,
     votingService,
+    votePanelService,
     gameFinalizationService,
     ephemeralAdapter,
     testGameService,
@@ -138,12 +141,14 @@ async function main(): Promise<void> {
       const view = await dayService.renderVote(result.game);
       const controlMessage = await bot.api.sendMessage(result.game.chatId, view.text, { reply_markup: view.replyMarkup });
       await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+      await votePanelService.deliverVotePanels(result.game);
     }
     if (result.kind === 'DAY_REVOTE_STARTED') {
       await testGameService.castVirtualVotes(result.game);
       const view = await dayService.renderVote(result.game);
       const controlMessage = await bot.api.sendMessage(result.game.chatId, view.text, { reply_markup: view.replyMarkup });
       await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+      await votePanelService.deliverVotePanels(result.game);
     }
     if (result.kind === 'DAY_TIE_DISCUSSION_STARTED') {
       const controlMessage = await bot.api.sendMessage(result.game.chatId, '🤝 Первый тур завершился ничьей. У города есть 30 секунд на обсуждение перед повторным голосованием.');
@@ -154,6 +159,7 @@ async function main(): Promise<void> {
       const view = await dayService.renderVote(result.game);
       const controlMessage = await bot.api.sendMessage(result.game.chatId, view.text, { reply_markup: view.replyMarkup });
       await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+      await votePanelService.deliverVotePanels(result.game);
     }
     if (result.kind === 'DAY_NOMINATION_EXPIRED' || result.kind === 'DAY_REVOTE_EXPIRED' || result.kind === 'DAY_FINAL_DECISION_EXPIRED') {
       await bot.api.sendMessage(result.game.chatId, '⌛ Время городского подраунда истекло. Организатор может завершить его актуальным контролом.');
@@ -163,6 +169,7 @@ async function main(): Promise<void> {
       const view = await dayService.renderVote(result.game);
       const controlMessage = await bot.api.sendMessage(result.game.chatId, view.text, { reply_markup: view.replyMarkup });
       await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+      await votePanelService.deliverVotePanels(result.game);
     }
     if (result.kind === 'DAY_VOTE_RESOLVED') {
       await closeVoteControlMessage(result.game, result.resolution);
@@ -221,6 +228,7 @@ async function main(): Promise<void> {
         const view = await dayService.renderVote(game);
         const message = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
         await gameRepository.setControlMessageId(game.id, message.message_id);
+        await votePanelService.deliverVotePanels(game);
       } else if (game.phase === 'DAY_DISCUSSION') {
         const message = await bot.api.sendMessage(game.chatId, '☀️ Игра восстановлена. Обсуждение продолжается до сохранённого дедлайна.');
         await gameRepository.setControlMessageId(game.id, message.message_id);

@@ -1,7 +1,7 @@
 import type { InlineKeyboardMarkup } from 'grammy/types';
 
-import { encodeDonCheckCallback, encodeGameCallback, encodeManiacSkipCallback, encodeNightTargetCallback } from '../callbacks/callbackData.js';
-import { DEFAULT_ROLE_DISPLAY_NAMES, type NightActionType, type Role, type RoleDisplayNames } from '../../domain/game/types.js';
+import { encodeDonCheckCallback, encodeFinalDecisionCallback, encodeGameCallback, encodeManiacSkipCallback, encodeNightTargetCallback, encodeVoteCallback, encodeVoteConfirmationCallback } from '../callbacks/callbackData.js';
+import { DEFAULT_ROLE_DISPLAY_NAMES, type NightActionType, type Role, type RoleDisplayNames, type VoteRoundKind } from '../../domain/game/types.js';
 
 export function renderRolePanel(input: Readonly<{ role: Role; roleDisplayNames?: RoleDisplayNames }>): Readonly<{ text: string }> {
   return {
@@ -62,6 +62,43 @@ export function renderMafiaCouncilPanel(input: Readonly<{
         : '⏳ Убийство учитывает только подтверждённые голоса.',
     ].join('\n'),
     replyMarkup: { inline_keyboard: [...targetRows, ...confirmationRow, ...refreshRow] },
+  };
+}
+
+export function renderCityVotePanel(input: Readonly<{
+  gameId: string;
+  phaseVersion: number;
+  kind: VoteRoundKind;
+  candidates: readonly Readonly<{ displayName: string; targetIndex: number }>[];
+  selectedChoice: string | null;
+  confirmed: boolean;
+}>): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
+  const choiceRows = input.kind === 'FINAL_DECISION'
+    ? [[
+      { text: '⚰️ Казнить всех кандидатов', callback_data: encodeFinalDecisionCallback(input.gameId, input.phaseVersion, 'all-leave') },
+      { text: '🕊️ Оставить всех', callback_data: encodeFinalDecisionCallback(input.gameId, input.phaseVersion, 'all-stay') },
+    ]]
+    : chunk(input.candidates.map((candidate) => ({
+      text: candidate.displayName.slice(0, 48),
+      callback_data: encodeVoteCallback(input.gameId, input.phaseVersion, candidate.targetIndex),
+    })), 2);
+  const confirmationRow = input.selectedChoice !== null && !input.confirmed
+    ? [[{ text: '✅ Подтвердить мой выбор', callback_data: encodeVoteConfirmationCallback(input.gameId, input.phaseVersion) }]]
+    : [];
+
+  return {
+    text: [
+      votePanelTitle(input.kind),
+      '',
+      input.selectedChoice === null ? 'Ваш выбор: —' : `Ваш выбор: ${input.selectedChoice} ${input.confirmed ? '✅' : '⏳'}`,
+      '',
+      input.confirmed
+        ? '✅ Выбор подтверждён и учтён в голосовании.'
+        : input.selectedChoice === null
+          ? 'Выберите вариант — до подтверждения он никуда не попадёт.'
+          : 'Проверьте выбранный вариант и подтвердите его.',
+    ].join('\n'),
+    replyMarkup: { inline_keyboard: input.confirmed ? [] : [...choiceRows, ...confirmationRow] },
   };
 }
 
@@ -153,6 +190,15 @@ function nightPrompt(actionType: NightActionType, roleDisplayNames: RoleDisplayN
       return '👑 Выберите игрока для проверки Дона.';
     case 'MANIAC_SKIP':
       return '🤫 Пропустите ход Маньяка.';
+  }
+}
+
+function votePanelTitle(kind: VoteRoundKind): string {
+  switch (kind) {
+    case 'NOMINATION': return '📣 Ваша номинация';
+    case 'PRIMARY': return '🗳️ Ваш голос';
+    case 'REVOTE': return '🗳️ Ваш голос в ревоте';
+    case 'FINAL_DECISION': return '⚖️ Ваше финальное решение';
   }
 }
 

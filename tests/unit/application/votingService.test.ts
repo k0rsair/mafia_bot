@@ -160,4 +160,109 @@ describe('VotingService city rounds', () => {
       resolution: { eliminatedPlayerIds: [vera.id] },
     });
   });
+
+  it('loads an empty unconfirmed personal panel when the player has no vote', async () => {
+    const round = { id: 'round-1', kind: 'PRIMARY', candidatePlayerIds: [boris.id, vera.id] } as VoteRound;
+    const findVote = vi.fn().mockResolvedValue(null);
+    const service = new VotingService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockResolvedValue(alice),
+        listAlivePlayers: vi.fn().mockResolvedValue([alice, boris, vera]),
+      } as unknown as PlayerRepository,
+      { findVote } as unknown as VoteRepository,
+      createLogger({ logLevel: 'silent' }),
+      undefined,
+      { findOpenRound: vi.fn().mockResolvedValue(round) } as unknown as VoteRoundRepository,
+    );
+
+    await expect(service.getVotePanelState({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      chatId: game.chatId,
+      userId: alice.userId,
+    })).resolves.toMatchObject({
+      selectedChoice: null,
+      confirmed: false,
+      candidates: [
+        { displayName: 'Борис', targetIndex: 0 },
+        { displayName: 'Вера', targetIndex: 1 },
+      ],
+    });
+  });
+
+  it('shows the current round draft without treating a missing vote as confirmed', async () => {
+    const round = { id: 'round-1', kind: 'PRIMARY', candidatePlayerIds: [boris.id, vera.id] } as VoteRound;
+    const service = new VotingService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockResolvedValue(alice),
+        listAlivePlayers: vi.fn().mockResolvedValue([alice, boris, vera]),
+      } as unknown as PlayerRepository,
+      { findVote: vi.fn().mockResolvedValue({ targetPlayerId: boris.id, isSkip: false, confirmedAt: null }) } as unknown as VoteRepository,
+      createLogger({ logLevel: 'silent' }),
+      undefined,
+      { findOpenRound: vi.fn().mockResolvedValue(round) } as unknown as VoteRoundRepository,
+    );
+
+    await expect(service.getVotePanelState({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      chatId: game.chatId,
+      userId: alice.userId,
+    })).resolves.toMatchObject({ selectedChoice: 'Борис', confirmed: false });
+  });
+
+  it('marks a confirmed personal choice from the current round candidates', async () => {
+    const round = { id: 'round-1', kind: 'PRIMARY', candidatePlayerIds: [boris.id, vera.id] } as VoteRound;
+    const service = new VotingService(
+      { findById: vi.fn().mockResolvedValue(game) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockResolvedValue(alice),
+        listAlivePlayers: vi.fn().mockResolvedValue([alice, boris, vera]),
+      } as unknown as PlayerRepository,
+      { findVote: vi.fn().mockResolvedValue({ targetPlayerId: vera.id, isSkip: false, confirmedAt: new Date('2026-08-22T14:00:00.000Z') }) } as unknown as VoteRepository,
+      createLogger({ logLevel: 'silent' }),
+      undefined,
+      { findOpenRound: vi.fn().mockResolvedValue(round) } as unknown as VoteRoundRepository,
+    );
+
+    await expect(service.getVotePanelState({
+      gameId: game.id,
+      phaseVersion: game.stateVersion,
+      chatId: game.chatId,
+      userId: alice.userId,
+    })).resolves.toMatchObject({ selectedChoice: 'Вера', confirmed: true });
+  });
+
+  it('maps a final-decision draft to the public all-leave or all-stay label', async () => {
+    const finalGame = { ...game, phase: 'DAY_FINAL_DECISION' } as Game;
+    const round = { id: 'round-1', kind: 'FINAL_DECISION', candidatePlayerIds: [boris.id, vera.id] } as VoteRound;
+    const findVote = vi.fn()
+      .mockResolvedValueOnce({ targetPlayerId: boris.id, isSkip: false, confirmedAt: null })
+      .mockResolvedValueOnce({ targetPlayerId: null, isSkip: true, confirmedAt: new Date('2026-08-22T14:00:00.000Z') });
+    const service = new VotingService(
+      { findById: vi.fn().mockResolvedValue(finalGame) } as unknown as GameRepository,
+      {
+        findByGameAndUserId: vi.fn().mockResolvedValue(alice),
+        listAlivePlayers: vi.fn().mockResolvedValue([alice, boris, vera]),
+      } as unknown as PlayerRepository,
+      { findVote } as unknown as VoteRepository,
+      createLogger({ logLevel: 'silent' }),
+      undefined,
+      { findOpenRound: vi.fn().mockResolvedValue(round) } as unknown as VoteRoundRepository,
+    );
+    const input = { gameId: finalGame.id, phaseVersion: finalGame.stateVersion, chatId: finalGame.chatId, userId: alice.userId };
+
+    await expect(service.getVotePanelState(input)).resolves.toMatchObject({
+      kind: 'FINAL_DECISION',
+      selectedChoice: 'Казнить всех кандидатов',
+      confirmed: false,
+    });
+    await expect(service.getVotePanelState(input)).resolves.toMatchObject({
+      kind: 'FINAL_DECISION',
+      selectedChoice: 'Оставить всех',
+      confirmed: true,
+    });
+  });
 });

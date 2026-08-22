@@ -42,6 +42,7 @@ describe('day vote callbacks', () => {
       { confirmVote } as never,
       { renderVote: vi.fn().mockResolvedValue({ text: '🗳️ Дневное голосование', replyMarkup: { inline_keyboard: [[{ text: 'Игрок 2', callback_data: 'v:game-1:7:0' }]] } }) } as never,
       { closeDayVote, recordControlMessage, getCurrentGame: vi.fn().mockResolvedValue(nightGame) } as never,
+      { refreshPanel: vi.fn().mockResolvedValue(undefined), openPanel: vi.fn().mockResolvedValue(undefined), deliverVotePanels: vi.fn() } as never,
       { deliverNightPanels } as never,
       { playVirtualNightActions } as never,
       createLogger({ logLevel: 'silent' }),
@@ -91,6 +92,7 @@ describe('day vote callbacks', () => {
     const handlers: CallbackHandler[] = [];
     const voteGame = { id: 'game-1', chatId: '-1001', phase: 'DAY_NOMINATION', stateVersion: 7 } as Game;
     const castVote = vi.fn().mockResolvedValue({ game: voteGame, votesCast: 0, votersTotal: 3, allVoted: false });
+    const refreshPanel = vi.fn().mockResolvedValue(undefined);
     const confirmVote = vi.fn();
     const renderVote = vi.fn().mockResolvedValue({ text: '📣 Номинации\nПодтверждено: 0/3', replyMarkup: { inline_keyboard: [] } });
     const bot = {
@@ -104,6 +106,7 @@ describe('day vote callbacks', () => {
       { castVote, confirmVote } as never,
       { renderVote } as never,
       { getCurrentGame: vi.fn().mockResolvedValue(voteGame), closeDayVote: vi.fn() } as never,
+      { refreshPanel } as never,
       {} as never,
       {} as never,
       createLogger({ logLevel: 'silent' }),
@@ -112,7 +115,7 @@ describe('day vote callbacks', () => {
     const handler = handlers[0];
     if (handler === undefined) throw new Error('Vote handler was not registered');
     await handler({
-      callbackQuery: { data: encodeVoteCallback(voteGame.id, voteGame.stateVersion, 0), id: 'query-1' },
+      callbackQuery: { data: encodeVoteCallback(voteGame.id, voteGame.stateVersion, 0), id: 'query-1', message: { ephemeral_message_id: 99 } },
       chat: { id: -1001, type: 'supergroup' },
       from: { id: 101 },
       editMessageText,
@@ -121,7 +124,8 @@ describe('day vote callbacks', () => {
 
     expect(castVote).toHaveBeenCalledWith(expect.objectContaining({ action: 'candidate', targetIndex: 0 }));
     expect(confirmVote).not.toHaveBeenCalled();
-    expect(editMessageText).toHaveBeenCalledWith('📣 Номинации\nПодтверждено: 0/3', { reply_markup: { inline_keyboard: [] } });
+    expect(refreshPanel).toHaveBeenCalledWith(expect.objectContaining({ ephemeralMessageId: 99 }));
+    expect(editMessageText).not.toHaveBeenCalled();
     expect(answerCallbackQuery).toHaveBeenCalledWith({ text: '📝 Выбор сохранён. Подтвердите его отдельной кнопкой.' });
   });
 
@@ -140,6 +144,7 @@ describe('day vote callbacks', () => {
       { confirmVote: vi.fn().mockResolvedValue({ game: voteGame, votesCast: 3, votersTotal: 3, allVoted: true }) } as never,
       { renderVote: vi.fn().mockResolvedValue({ text: '⚖️ Финальное решение', replyMarkup: { inline_keyboard: [[{ text: '✅ Подтвердить', callback_data: 'v:game-1:7:confirm' }]] } }) } as never,
       { closeDayVote: vi.fn().mockResolvedValue(null), getCurrentGame: vi.fn().mockResolvedValue(nextGame) } as never,
+      { openPanel: vi.fn().mockResolvedValue(undefined), refreshPanel: vi.fn().mockResolvedValue(undefined) } as never,
       {} as never,
       {} as never,
       createLogger({ logLevel: 'silent' }),
@@ -166,13 +171,17 @@ describe('day vote callbacks', () => {
     const reply = vi.fn().mockResolvedValue({ message_id: 42 });
     const recordControlMessage = vi.fn().mockResolvedValue(undefined);
 
+    const deliverVotePanels = vi.fn().mockResolvedValue(undefined);
+    const castVirtualVotes = vi.fn().mockResolvedValue(null);
+
     await publishVoteClosure(
       { api: { editMessageText }, reply } as unknown as Context,
       { kind: 'DAY_VOTE_STARTED', game: primaryGame },
       { renderVote: vi.fn().mockResolvedValue({ text: '🗳️ Основное голосование', replyMarkup: { inline_keyboard: [] } }) } as never,
       { getCurrentGame: vi.fn().mockResolvedValue(primaryGame), recordControlMessage } as never,
+      { deliverVotePanels } as never,
       {} as never,
-      {} as never,
+      { castVirtualVotes } as never,
     );
 
     expect(editMessageText).toHaveBeenCalledWith(
@@ -181,6 +190,8 @@ describe('day vote callbacks', () => {
       '📣 Номинации завершены. Начинается основное голосование.',
       { reply_markup: { inline_keyboard: [] } },
     );
+    expect(castVirtualVotes).toHaveBeenCalledWith(primaryGame);
+    expect(deliverVotePanels).toHaveBeenCalledWith(primaryGame);
     expect(reply).toHaveBeenCalledWith('🗳️ Основное голосование', { reply_markup: { inline_keyboard: [] } });
     expect(recordControlMessage).toHaveBeenCalledWith(primaryGame.id, 42);
   });

@@ -37,6 +37,14 @@ export type VoteRoundOptions = Readonly<{
   candidatePlayerIds: readonly string[];
 }>;
 
+export type CityVotePanelState = Readonly<{
+  game: Game;
+  kind: VoteRoundKind;
+  candidates: readonly Readonly<{ displayName: string; targetIndex: number }>[];
+  selectedChoice: string | null;
+  confirmed: boolean;
+}>;
+
 export type AppliedVoteResolution = Readonly<{
   resolution: VoteResolution;
   roundKind?: VoteRoundKind;
@@ -153,6 +161,37 @@ export class VotingService {
     return round === null
       ? { kind: null, candidatePlayerIds: [] }
       : { kind: round.kind as VoteRoundKind, candidatePlayerIds: round.candidatePlayerIds };
+  }
+
+  public async getVotePanelState(input: Readonly<{
+    gameId: string;
+    phaseVersion: number;
+    chatId: string;
+    userId: string;
+  }>): Promise<CityVotePanelState> {
+    const { game, voter } = await this.getVotePlayer(input.gameId, input.phaseVersion, input.chatId, input.userId);
+    const [activeRound, alivePlayers, vote] = await Promise.all([
+      this.getActiveVoteRound(game.id, game.stateVersion),
+      this.playerRepository.listAlivePlayers(game.id),
+      this.voteRepository.findVote({ gameId: game.id, phaseVersion: game.stateVersion, voterPlayerId: voter.id }),
+    ]);
+    const kind = (activeRound?.kind ?? 'PRIMARY') as VoteRoundKind;
+    const candidatePlayerIds = activeRound?.candidatePlayerIds ?? alivePlayers.map((player) => player.id);
+    const candidates = candidatePlayerIds.flatMap((candidatePlayerId, targetIndex) => {
+      const player = alivePlayers.find((alivePlayer) => alivePlayer.id === candidatePlayerId);
+      return player === undefined ? [] : [{ displayName: player.displayName, targetIndex }];
+    });
+    const confirmed = vote !== null && vote.confirmedAt !== null;
+    const selectedChoice = vote === null
+      ? null
+      : kind === 'FINAL_DECISION'
+        ? vote.isSkip ? 'Оставить всех' : 'Казнить всех кандидатов'
+        : candidates.find((candidate) => candidatePlayerIds[candidate.targetIndex] === vote.targetPlayerId)?.displayName ?? null;
+    this.logger.debug(
+      { gameId: game.id, phase: game.phase, phaseVersion: game.stateVersion, confirmed, hasDraft: vote !== null, candidateCount: candidates.length },
+      '[FIX:city-vote-panel] Loaded personal city vote panel state',
+    );
+    return { game, kind, candidates, selectedChoice, confirmed };
   }
 
   public async getTiedCandidateIds(gameId: string, kind: Extract<VoteRoundKind, 'PRIMARY' | 'REVOTE'>): Promise<readonly string[]> {

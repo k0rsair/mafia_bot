@@ -2,6 +2,7 @@ import type { Bot, Context } from 'grammy';
 
 import type { DayService } from '../../application/DayService.js';
 import type { NightActionService } from '../../application/NightActionService.js';
+import type { VotePanelService } from '../../application/VotePanelService.js';
 import { VotingError, type AppliedVoteResolution, type ResolvedVoteRound, type VotingService } from '../../application/VotingService.js';
 import type { CityVoteClosure, PhaseService } from '../../application/PhaseService.js';
 import type { TestGameService } from '../../application/TestGameService.js';
@@ -19,6 +20,7 @@ export function registerVoteCallbacks(
   votingService: VotingService,
   dayService: DayService,
   phaseService: PhaseService,
+  votePanelService: VotePanelService,
   nightActionService: NightActionService,
   testGameService: TestGameService,
   logger: AppLogger,
@@ -31,48 +33,53 @@ export function registerVoteCallbacks(
       return;
     }
 
+    const input = {
+      gameId: callback.gameId,
+      phaseVersion: callback.phaseVersion,
+      chatId: String(context.chat.id),
+      userId: String(context.from.id),
+      callbackQueryId: context.callbackQuery.id,
+    };
+    const voteInput = {
+      gameId: input.gameId,
+      phaseVersion: input.phaseVersion,
+      chatId: input.chatId,
+      userId: input.userId,
+    };
+    const ephemeralMessageId = context.callbackQuery.message?.ephemeral_message_id;
+
     try {
+      if (callback.action === 'panel') {
+        await votePanelService.openPanel(input);
+        await context.answerCallbackQuery();
+        return;
+      }
+
       if (callback.action !== 'confirm') {
         await votingService.castVote({
-          gameId: callback.gameId,
-          phaseVersion: callback.phaseVersion,
-          chatId: String(context.chat.id),
-          userId: String(context.from.id),
+          ...voteInput,
           targetIndex: callback.targetIndex ?? null,
           action: callback.action,
         });
-        const currentGame = await phaseService.getCurrentGame(callback.gameId);
-        if (currentGame !== null && currentGame.stateVersion === callback.phaseVersion) {
-          const view = await dayService.renderVote(currentGame);
-          await context.editMessageText(view.text, { reply_markup: view.replyMarkup });
-        }
+        await refreshOrOpenVotePanel(votePanelService, input, ephemeralMessageId);
         await context.answerCallbackQuery({ text: '📝 Выбор сохранён. Подтвердите его отдельной кнопкой.' });
         return;
       }
 
-      const progress = await votingService.confirmVote({
-        gameId: callback.gameId,
-        phaseVersion: callback.phaseVersion,
-        chatId: String(context.chat.id),
-        userId: String(context.from.id),
-      });
-      const view = await dayService.renderVote(progress.game);
+      const progress = await votingService.confirmVote(voteInput);
+      await refreshOrOpenVotePanel(votePanelService, input, ephemeralMessageId);
       if (!progress.allVoted) {
-        await context.editMessageText(view.text, { reply_markup: view.replyMarkup });
+        await refreshPublicVoteControl(context, progress.game.id, dayService, phaseService, logger);
         await context.answerCallbackQuery({ text: '✅ Выбор подтверждён.' });
         return;
       }
 
       const closure = await phaseService.closeDayVote(progress.game);
       if (closure === null) {
-        const currentGame = await phaseService.getCurrentGame(callback.gameId);
-        if (currentGame !== null && currentGame.stateVersion === callback.phaseVersion) {
-          await context.editMessageText(view.text, { reply_markup: view.replyMarkup });
-        }
         await context.answerCallbackQuery({ text: '✅ Выбор подтверждён.' });
         return;
       }
-      await publishVoteClosure(context, closure, dayService, phaseService, nightActionService, testGameService, roleDisplayNames);
+      await publishVoteClosure(context, closure, dayService, phaseService, votePanelService, nightActionService, testGameService, roleDisplayNames);
       await context.answerCallbackQuery({ text: '✅ Выбор подтверждён.' });
     } catch (error) {
       logger.warn({ gameId: callback.gameId, userId: String(context.from.id), error }, '[registerVoteCallbacks] Rejected vote callback');
@@ -87,6 +94,7 @@ export async function publishVoteClosure(
   closure: CityVoteClosure,
   dayService: DayService,
   phaseService: Pick<PhaseService, 'recordControlMessage' | 'getCurrentGame'>,
+  votePanelService: Pick<VotePanelService, 'deliverVotePanels'>,
   nightActionService: Pick<NightActionService, 'deliverNightPanels'>,
   testGameService: TestGameService,
   roleDisplayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES,
@@ -98,7 +106,9 @@ export async function publishVoteClosure(
   }
   if (closure.kind === 'DAY_VOTE_STARTED') {
     await replaceVoteMessage(context, closure.game, '📣 Номинации завершены. Начинается основное голосование.');
+    await testGameService.castVirtualVotes(closure.game);
     await publishCurrentRound(context, closure.game, dayService, phaseService);
+    await votePanelService.deliverVotePanels(closure.game);
     return;
   }
   if (closure.kind === 'DAY_TIE_DISCUSSION_STARTED') {
@@ -110,7 +120,9 @@ export async function publishVoteClosure(
   if (closure.kind === 'DAY_FINAL_DECISION_STARTED') {
     await closeUnresolvedRoundMessage(context, closure.game, closure.resolution);
     await context.reply('⚖️ Повторное голосование снова завершилось ничьей. Город примет финальное решение.');
+    await testGameService.castVirtualVotes(closure.game);
     await publishCurrentRound(context, closure.game, dayService, phaseService);
+    await votePanelService.deliverVotePanels(closure.game);
     return;
   }
 
@@ -186,10 +198,6 @@ async function replaceVoteMessage(
   text: string,
 ): Promise<void> {
   const replyMarkup = { inline_keyboard: [] };
-  if (context.callbackQuery !== undefined) {
-    await context.editMessageText(text, { reply_markup: replyMarkup });
-    return;
-  }
   if (game.controlMessageId !== null) {
     try {
       await context.api.editMessageText(game.chatId, game.controlMessageId, text, { reply_markup: replyMarkup });
@@ -198,5 +206,40 @@ async function replaceVoteMessage(
       // The phase has been committed already, so publish the replacement below.
     }
   }
+  if (context.callbackQuery !== undefined) {
+    await context.editMessageText(text, { reply_markup: replyMarkup });
+    return;
+  }
   await context.reply(text, { reply_markup: replyMarkup });
+}
+
+async function refreshOrOpenVotePanel(
+  votePanelService: VotePanelService,
+  input: Readonly<{ gameId: string; phaseVersion: number; chatId: string; userId: string; callbackQueryId: string }>,
+  ephemeralMessageId: number | undefined,
+): Promise<void> {
+  if (ephemeralMessageId === undefined) {
+    await votePanelService.openPanel(input);
+    return;
+  }
+  await votePanelService.refreshPanel({ ...input, ephemeralMessageId });
+}
+
+async function refreshPublicVoteControl(
+  context: Context,
+  gameId: string,
+  dayService: DayService,
+  phaseService: Pick<PhaseService, 'getCurrentGame'>,
+  logger: AppLogger,
+): Promise<void> {
+  const game = await phaseService.getCurrentGame(gameId);
+  if (game === null || game.controlMessageId === null || !['DAY_NOMINATION', 'DAY_VOTE', 'DAY_REVOTE', 'DAY_FINAL_DECISION'].includes(game.phase)) {
+    return;
+  }
+  const view = await dayService.renderVote(game);
+  try {
+    await context.api.editMessageText(game.chatId, game.controlMessageId, view.text, { reply_markup: view.replyMarkup });
+  } catch (error) {
+    logger.warn({ gameId: game.id, phase: game.phase, phaseVersion: game.stateVersion, error }, '[FIX:city-vote-panel] Could not refresh public city vote control');
+  }
 }
