@@ -81,6 +81,10 @@ export function parseGameCallback(value: string): GameCallback | null {
   return { kind: 'game', gameId, phaseVersion, action };
 }
 
+export function encodeVotePanelCallback(gameId: string, phaseVersion: number): string {
+  return `v:${gameId}:${phaseVersion.toString(36)}:panel`;
+}
+
 export function encodeVoteCallback(gameId: string, phaseVersion: number, targetIndex: number): string {
   return `v:${gameId}:${phaseVersion.toString(36)}:candidate:${encodeTargetIndex(targetIndex)}`;
 }
@@ -91,10 +95,6 @@ export function encodeFinalDecisionCallback(gameId: string, phaseVersion: number
 
 export function encodeVoteConfirmationCallback(gameId: string, phaseVersion: number): string {
   return `v:${gameId}:${phaseVersion.toString(36)}:confirm`;
-}
-
-export function encodeVotePanelCallback(gameId: string, phaseVersion: number): string {
-  return `v:${gameId}:${phaseVersion.toString(36)}:panel`;
 }
 
 export function parseVoteCallback(value: string): VoteCallback | null {

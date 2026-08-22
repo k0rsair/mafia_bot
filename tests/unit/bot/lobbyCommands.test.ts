@@ -51,9 +51,9 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
     dayService: {},
     gameFinalizationService: {},
     ephemeralPanelService: { restorePanel, deliverRolePanels },
+    votePanelService: { restorePanel: restoreVotePanel, deliverVotePanels },
     ephemeralAdapter: { sendText },
     testGameService: { createTestGame },
-    votePanelService: { restorePanel: restoreVotePanel, deliverVotePanels },
     config: { lobbyMaxPlayers: 15, testGameEnabled },
     logger: createLogger({ logLevel: 'silent' }),
   } as never);
@@ -184,16 +184,6 @@ describe('role confirmation commands', () => {
     expect(reply).not.toHaveBeenCalled();
   });
 
-  it('reports when a personal panel cannot be restored without an active game', async () => {
-    const handlers = setupHandlers(null);
-    const { context, reply } = createGroupContext(202);
-
-    await handlers.getCommand('restore_panel')(context);
-
-    expect(handlers.restorePanel).not.toHaveBeenCalled();
-    expect(reply).toHaveBeenCalledWith('ℹ️ Активной игры нет.');
-  });
-
   it('restores the personal city vote panel during a city round', async () => {
     const cityVoteGame = { ...roleConfirmationGame, phase: 'DAY_VOTE', stateVersion: 8 } as Game;
     const handlers = setupHandlers(cityVoteGame);
@@ -209,6 +199,16 @@ describe('role confirmation commands', () => {
     });
     expect(handlers.restorePanel).not.toHaveBeenCalled();
     expect(reply).not.toHaveBeenCalled();
+  });
+
+  it('reports when a personal panel cannot be restored without an active game', async () => {
+    const handlers = setupHandlers(null);
+    const { context, reply } = createGroupContext(202);
+
+    await handlers.getCommand('restore_panel')(context);
+
+    expect(handlers.restorePanel).not.toHaveBeenCalled();
+    expect(reply).toHaveBeenCalledWith('ℹ️ Активной игры нет.');
   });
 
   it('keeps the test-game command disabled unless the environment enables it', async () => {

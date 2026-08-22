@@ -181,13 +181,17 @@ export class VotingService {
       const player = alivePlayers.find((alivePlayer) => alivePlayer.id === candidatePlayerId);
       return player === undefined ? [] : [{ displayName: player.displayName, targetIndex }];
     });
+    const confirmed = vote !== null && vote.confirmedAt !== null;
     const selectedChoice = vote === null
       ? null
       : kind === 'FINAL_DECISION'
         ? vote.isSkip ? 'Оставить всех' : 'Казнить всех кандидатов'
-        : alivePlayers.find((player) => player.id === vote.targetPlayerId)?.displayName ?? null;
-
-    return { game, kind, candidates, selectedChoice, confirmed: vote?.confirmedAt !== null };
+        : candidates.find((candidate) => candidatePlayerIds[candidate.targetIndex] === vote.targetPlayerId)?.displayName ?? null;
+    this.logger.debug(
+      { gameId: game.id, phase: game.phase, phaseVersion: game.stateVersion, confirmed, hasDraft: vote !== null, candidateCount: candidates.length },
+      '[FIX:city-vote-panel] Loaded personal city vote panel state',
+    );
+    return { game, kind, candidates, selectedChoice, confirmed };
   }
 
   public async getTiedCandidateIds(gameId: string, kind: Extract<VoteRoundKind, 'PRIMARY' | 'REVOTE'>): Promise<readonly string[]> {

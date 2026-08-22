@@ -65,10 +65,6 @@ export function renderMafiaCouncilPanel(input: Readonly<{
   };
 }
 
-export function renderNightChoiceAccepted(): string {
-  return '✅ Ночной выбор принят. До конца ночи его можно изменить из панели.';
-}
-
 export function renderCityVotePanel(input: Readonly<{
   gameId: string;
   phaseVersion: number;
@@ -104,6 +100,10 @@ export function renderCityVotePanel(input: Readonly<{
     ].join('\n'),
     replyMarkup: { inline_keyboard: input.confirmed ? [] : [...choiceRows, ...confirmationRow] },
   };
+}
+
+export function renderNightChoiceAccepted(): string {
+  return '✅ Ночной выбор принят. До конца ночи его можно изменить из панели.';
 }
 
 export function renderCommissionerResult(displayName: string, isMafia: boolean): string {

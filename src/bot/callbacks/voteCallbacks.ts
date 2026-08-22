@@ -66,9 +66,7 @@ export function registerVoteCallbacks(
         return;
       }
 
-      const progress = await votingService.confirmVote({
-        ...voteInput,
-      });
+      const progress = await votingService.confirmVote(voteInput);
       await refreshOrOpenVotePanel(votePanelService, input, ephemeralMessageId);
       if (!progress.allVoted) {
         await refreshPublicVoteControl(context, progress.game.id, dayService, phaseService, logger);

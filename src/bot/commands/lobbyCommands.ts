@@ -5,8 +5,8 @@ import { EphemeralPanelError, type EphemeralPanelService, type RoleConfirmationR
 import type { GameFinalizationService } from '../../application/GameFinalizationService.js';
 import type { PhaseService } from '../../application/PhaseService.js';
 import type { DayService } from '../../application/DayService.js';
-import type { VotingService } from '../../application/VotingService.js';
 import type { VotePanelService } from '../../application/VotePanelService.js';
+import type { VotingService } from '../../application/VotingService.js';
 import { LobbyError, type LobbyService, type LobbySnapshot } from '../../application/LobbyService.js';
 import { NightActionError, type NightActionService } from '../../application/NightActionService.js';
 import type { TestGameService } from '../../application/TestGameService.js';
@@ -26,12 +26,12 @@ type LobbyHandlerDependencies = Readonly<{
   phaseService: PhaseService;
   dayService: DayService;
   votingService: VotingService;
+  votePanelService: VotePanelService;
   gameFinalizationService: GameFinalizationService;
   ephemeralPanelService: EphemeralPanelService;
   nightActionService: NightActionService;
   ephemeralAdapter: TelegramEphemeralAdapter;
   testGameService: TestGameService;
-  votePanelService: VotePanelService;
   config: Pick<AppConfig, 'lobbyMaxPlayers' | 'testGameEnabled' | 'roleDisplayNames'>;
   logger: AppLogger;
 }>;

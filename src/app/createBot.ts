@@ -5,11 +5,11 @@ import type { EphemeralPanelService } from '../application/EphemeralPanelService
 import type { NightActionService } from '../application/NightActionService.js';
 import type { DayService } from '../application/DayService.js';
 import type { PhaseService } from '../application/PhaseService.js';
+import type { VotePanelService } from '../application/VotePanelService.js';
 import type { VotingService } from '../application/VotingService.js';
 import type { GameFinalizationService } from '../application/GameFinalizationService.js';
 import type { LobbyService } from '../application/LobbyService.js';
 import type { TestGameService } from '../application/TestGameService.js';
-import type { VotePanelService } from '../application/VotePanelService.js';
 import type { TelegramEphemeralAdapter } from '../bot/telegram/ephemeral.js';
 import type { AppConfig } from '../config/env.js';
 import type { AppLogger } from '../observability/logger.js';
@@ -27,10 +27,10 @@ type BotDependencies = Readonly<{
   dayService: DayService;
   phaseService: PhaseService;
   votingService: VotingService;
+  votePanelService: VotePanelService;
   gameFinalizationService: GameFinalizationService;
   ephemeralAdapter: TelegramEphemeralAdapter;
   testGameService: TestGameService;
-  votePanelService: VotePanelService;
 }>;
 
 export function createBot(config: AppConfig, logger: AppLogger, dependencies: BotDependencies): Bot<Context> {

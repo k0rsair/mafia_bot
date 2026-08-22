@@ -5,6 +5,7 @@ import { encodeGameCallback, encodeNightTargetCallback, encodeVoteCallback, enco
 import { TelegramEphemeralAdapter } from '../../../src/bot/telegram/ephemeral.js';
 import { renderCityVotePanel, renderNightPanel, renderRolePanel } from '../../../src/bot/views/ephemeralPanelView.js';
 import { renderRoleControl } from '../../../src/bot/views/phaseView.js';
+import { renderVoteView } from '../../../src/bot/views/voteView.js';
 import { createLogger } from '../../../src/observability/logger.js';
 
 describe('group-only private panels', () => {
@@ -121,10 +122,64 @@ describe('group-only private panels', () => {
 
     expect(initialPanel.text).toContain('Ваш выбор: —');
     expect(initialPanel.replyMarkup.inline_keyboard).toHaveLength(1);
+    expect(JSON.stringify(initialPanel.replyMarkup)).not.toContain(':confirm');
     expect(draftPanel.text).toContain('Ваш выбор: Борис ⏳');
     expect(JSON.stringify(draftPanel.replyMarkup)).toContain(':confirm');
     expect(confirmedPanel.text).toContain('Ваш выбор: Борис ✅');
     expect(confirmedPanel.replyMarkup.inline_keyboard).toEqual([]);
+  });
+
+  it('renders a personal final-decision panel for empty, all-leave, and all-stay choices', () => {
+    const emptyPanel = renderCityVotePanel({
+      gameId: 'game-id',
+      phaseVersion: 4,
+      kind: 'FINAL_DECISION',
+      candidates: [{ displayName: 'Борис', targetIndex: 0 }],
+      selectedChoice: null,
+      confirmed: false,
+    });
+    const allLeaveDraft = renderCityVotePanel({
+      gameId: 'game-id',
+      phaseVersion: 4,
+      kind: 'FINAL_DECISION',
+      candidates: [{ displayName: 'Борис', targetIndex: 0 }],
+      selectedChoice: 'Казнить всех кандидатов',
+      confirmed: false,
+    });
+    const allStayConfirmed = renderCityVotePanel({
+      gameId: 'game-id',
+      phaseVersion: 4,
+      kind: 'FINAL_DECISION',
+      candidates: [{ displayName: 'Борис', targetIndex: 0 }],
+      selectedChoice: 'Оставить всех',
+      confirmed: true,
+    });
+
+    expect(emptyPanel.text).toContain('Ваш выбор: —');
+    expect(JSON.stringify(emptyPanel.replyMarkup)).toContain('all-leave');
+    expect(JSON.stringify(emptyPanel.replyMarkup)).toContain('all-stay');
+    expect(JSON.stringify(emptyPanel.replyMarkup)).not.toContain(':confirm');
+    expect(allLeaveDraft.text).toContain('Ваш выбор: Казнить всех кандидатов ⏳');
+    expect(JSON.stringify(allLeaveDraft.replyMarkup)).toContain(':confirm');
+    expect(allStayConfirmed.text).toContain('Ваш выбор: Оставить всех ✅');
+    expect(allStayConfirmed.replyMarkup.inline_keyboard).toEqual([]);
+  });
+
+  it('keeps the public city-vote control free of personal choice buttons', () => {
+    const view = renderVoteView({
+      gameId: 'game-id',
+      phaseVersion: 2,
+      kind: 'PRIMARY',
+      candidates: [{ id: 'boris', displayName: 'Борис' }],
+      votesCast: 1,
+      votersTotal: 3,
+      voteDetails: [{ voterDisplayName: 'Алиса', targetDisplayName: 'Борис' }],
+    });
+
+    expect(view.text).toContain('• Алиса → Борис ✅');
+    expect(JSON.stringify(view.replyMarkup)).toContain('Открыть моё голосование');
+    expect(JSON.stringify(view.replyMarkup)).not.toContain(':candidate:');
+    expect(JSON.stringify(view.replyMarkup)).not.toContain(':confirm');
   });
 
   it('does not render a second confirmation control after showing a role', () => {

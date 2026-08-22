@@ -73,6 +73,7 @@ export class VoteRepository {
   }
 
   public async findVote(input: Readonly<{ gameId: string; phaseVersion: number; voterPlayerId: string }>): Promise<Vote | null> {
+    this.logger.debug({ gameId: input.gameId, phaseVersion: input.phaseVersion }, '[FIX:city-vote-panel] Loading personal city vote');
     return this.prisma.vote.findUnique({
       where: {
         gameId_phaseVersion_voterPlayerId: input,

@@ -37,6 +37,7 @@ describe('VotePanelService', () => {
       callbackQueryId: 'query-1',
       text: expect.stringContaining('Ваш выбор: —'),
     }));
+    expect(JSON.stringify(sendText.mock.calls[0]?.[0].replyMarkup)).not.toContain(':confirm');
   });
 
   it('edits the personal panel into a confirmed state without buttons', async () => {

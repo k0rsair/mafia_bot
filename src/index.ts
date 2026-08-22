@@ -9,11 +9,11 @@ import { PhaseService, type PhaseDeadlineResult } from './application/PhaseServi
 import { NightActionService } from './application/NightActionService.js';
 import { NightResolutionService } from './application/NightResolutionService.js';
 import { DayService } from './application/DayService.js';
+import { VotePanelService } from './application/VotePanelService.js';
 import { VotingService, type AppliedVoteResolution } from './application/VotingService.js';
 import { GameFinalizationService } from './application/GameFinalizationService.js';
 import { RecoveryService } from './application/RecoveryService.js';
 import { TestGameService } from './application/TestGameService.js';
-import { VotePanelService } from './application/VotePanelService.js';
 import { loadConfig } from './config/env.js';
 import { createPrismaClient } from './infrastructure/db/prisma.js';
 import { GameRepository } from './infrastructure/repositories/GameRepository.js';
@@ -64,10 +64,10 @@ async function main(): Promise<void> {
     dayService,
     phaseService,
     votingService,
+    votePanelService,
     gameFinalizationService,
     ephemeralAdapter,
     testGameService,
-    votePanelService,
   });
   await registerCommandMenu(bot.api, logger, config.testGameEnabled);
   const closeVoteControlMessage = async (
