@@ -1,10 +1,13 @@
 import type { NightActionType, Role, RoleDistribution } from './types.js';
 import { GameRuleError } from './types.js';
 
-export const MIN_PLAYERS = 9;
+export const MIN_PLAYERS = 6;
 export const MAX_PLAYERS = 15;
 
 const ROLE_DISTRIBUTIONS: Readonly<Record<number, RoleDistribution>> = {
+  6: { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 0, MANIAC: 0, CIVILIAN: 4 },
+  7: { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 0, CIVILIAN: 4 },
+  8: { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 4 },
   9: { MAFIA: 1, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 4 },
   10: { MAFIA: 1, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 5 },
   11: { MAFIA: 2, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 5 },
@@ -16,7 +19,7 @@ const ROLE_DISTRIBUTIONS: Readonly<Record<number, RoleDistribution>> = {
 
 export function validateLobbySize(playerCount: number): void {
   if (!Number.isInteger(playerCount) || playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) {
-    throw new GameRuleError(`A game needs from ${MIN_PLAYERS} to ${MAX_PLAYERS} players; received ${playerCount}`);
+    throw new GameRuleError(`Чтобы начать игру, нужно от ${MIN_PLAYERS} до ${MAX_PLAYERS} игроков.`);
   }
 }
 

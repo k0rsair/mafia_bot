@@ -51,7 +51,7 @@ npm start
 | `BOT_USERNAME` | — | Username бота, оканчивается на `bot` |
 | `DATABASE_URL` | — | PostgreSQL connection URL |
 | `LOG_LEVEL` | `debug` | Для production используйте `info` или `warn` |
-| `LOBBY_MAX_PLAYERS` | `15` | Верхняя граница лобби, не больше 15; начать новую игру можно только с 9–15 игроками |
+| `LOBBY_MAX_PLAYERS` | `15` | Верхняя граница лобби, не больше 15; начать новую игру можно только с 6–15 игроками |
 | `ROLE_CONFIRMATION_DURATION_SECONDS` | `300` | Время подтверждения ролей |
 | `NIGHT_DURATION_SECONDS` | `120` | Длительность этапа Шлюхи и обычной ночи |
 | `DAY_DURATION_SECONDS` | `180` | Длительность дневного обсуждения |

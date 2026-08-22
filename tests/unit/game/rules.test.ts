@@ -6,6 +6,9 @@ import { getRoleLabel, GameRuleError } from '../../../src/domain/game/types.js';
 
 describe('city Mafia role rules', () => {
   it.each([
+    [6, { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 0, MANIAC: 0, CIVILIAN: 4 }],
+    [7, { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 0, MANIAC: 1, CIVILIAN: 4 }],
+    [8, { MAFIA: 0, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 4 }],
     [9, { MAFIA: 1, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 4 }],
     [10, { MAFIA: 1, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 5 }],
     [11, { MAFIA: 2, DON: 1, COMMISSIONER: 1, DOCTOR: 0, PROSTITUTE: 1, MANIAC: 1, CIVILIAN: 5 }],
@@ -18,8 +21,20 @@ describe('city Mafia role rules', () => {
   });
 
   it('rejects games outside the supported group size', () => {
-    expect(() => validateLobbySize(8)).toThrow(GameRuleError);
+    expect(() => validateLobbySize(5)).toThrow(GameRuleError);
     expect(() => validateLobbySize(16)).toThrow(GameRuleError);
+    expect(() => validateLobbySize(6)).not.toThrow();
+  });
+
+  it('assigns a six-player game without unused city roles', () => {
+    const playerIds = Array.from({ length: 6 }, (_, index) => `player-${index + 1}`);
+    const assignments = assignRoles(playerIds);
+
+    expect(assignments).toHaveLength(playerIds.length);
+    expect(assignments.reduce<Record<string, number>>((counts, assignment) => {
+      counts[assignment.role] = (counts[assignment.role] ?? 0) + 1;
+      return counts;
+    }, {})).toEqual({ DON: 1, COMMISSIONER: 1, CIVILIAN: 4 });
   });
 
   it('assigns every distinct player exactly one role from the city distribution', () => {
