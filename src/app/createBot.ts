@@ -9,6 +9,7 @@ import type { VotingService } from '../application/VotingService.js';
 import type { GameFinalizationService } from '../application/GameFinalizationService.js';
 import type { LobbyService } from '../application/LobbyService.js';
 import type { TestGameService } from '../application/TestGameService.js';
+import type { VotePanelService } from '../application/VotePanelService.js';
 import type { TelegramEphemeralAdapter } from '../bot/telegram/ephemeral.js';
 import type { AppConfig } from '../config/env.js';
 import type { AppLogger } from '../observability/logger.js';
@@ -29,6 +30,7 @@ type BotDependencies = Readonly<{
   gameFinalizationService: GameFinalizationService;
   ephemeralAdapter: TelegramEphemeralAdapter;
   testGameService: TestGameService;
+  votePanelService: VotePanelService;
 }>;
 
 export function createBot(config: AppConfig, logger: AppLogger, dependencies: BotDependencies): Bot<Context> {
@@ -54,7 +56,7 @@ export function createBot(config: AppConfig, logger: AppLogger, dependencies: Bo
     logger,
   });
   registerEphemeralCallbacks(bot, dependencies.ephemeralPanelService, dependencies.nightActionService, dependencies.phaseService, dependencies.testGameService, logger, config.roleDisplayNames);
-  registerVoteCallbacks(bot, dependencies.votingService, dependencies.dayService, dependencies.phaseService, dependencies.nightActionService, dependencies.testGameService, logger, config.roleDisplayNames);
+  registerVoteCallbacks(bot, dependencies.votingService, dependencies.dayService, dependencies.phaseService, dependencies.votePanelService, dependencies.nightActionService, dependencies.testGameService, logger, config.roleDisplayNames);
 
   bot.catch((error) => {
     logger.error(

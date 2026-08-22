@@ -12,9 +12,11 @@ type HandlerSetup = Readonly<{
   getActiveGame: ReturnType<typeof vi.fn>;
   listUnconfirmedRolePlayers: ReturnType<typeof vi.fn>;
   restorePanel: ReturnType<typeof vi.fn>;
+  restoreVotePanel: ReturnType<typeof vi.fn>;
   sendText: ReturnType<typeof vi.fn>;
   createTestGame: ReturnType<typeof vi.fn>;
   deliverRolePanels: ReturnType<typeof vi.fn>;
+  deliverVotePanels: ReturnType<typeof vi.fn>;
   recordControlMessage: ReturnType<typeof vi.fn>;
 }>;
 
@@ -23,6 +25,7 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
   const getActiveGame = vi.fn().mockResolvedValue(game);
   const listUnconfirmedRolePlayers = vi.fn().mockResolvedValue([{ userId: 'player-2', displayName: 'Игрок 2' }]);
   const restorePanel = vi.fn().mockResolvedValue(undefined);
+  const restoreVotePanel = vi.fn().mockResolvedValue(undefined);
   const sendText = vi.fn().mockResolvedValue({ ephemeral_message_id: 42 });
   const createTestGame = vi.fn().mockResolvedValue({
     id: 'test-game',
@@ -32,6 +35,7 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
     stateVersion: 7,
   } as Game);
   const deliverRolePanels = vi.fn().mockResolvedValue({ nightStarted: false });
+  const deliverVotePanels = vi.fn().mockResolvedValue(undefined);
   const recordControlMessage = vi.fn().mockResolvedValue(undefined);
   const bot = {
     command: vi.fn((name: string, handler: CommandHandler) => {
@@ -49,6 +53,7 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
     ephemeralPanelService: { restorePanel, deliverRolePanels },
     ephemeralAdapter: { sendText },
     testGameService: { createTestGame },
+    votePanelService: { restorePanel: restoreVotePanel, deliverVotePanels },
     config: { lobbyMaxPlayers: 15, testGameEnabled },
     logger: createLogger({ logLevel: 'silent' }),
   } as never);
@@ -64,9 +69,11 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
     getActiveGame,
     listUnconfirmedRolePlayers,
     restorePanel,
+    restoreVotePanel,
     sendText,
     createTestGame,
     deliverRolePanels,
+    deliverVotePanels,
     recordControlMessage,
   };
 }
@@ -185,6 +192,23 @@ describe('role confirmation commands', () => {
 
     expect(handlers.restorePanel).not.toHaveBeenCalled();
     expect(reply).toHaveBeenCalledWith('ℹ️ Активной игры нет.');
+  });
+
+  it('restores the personal city vote panel during a city round', async () => {
+    const cityVoteGame = { ...roleConfirmationGame, phase: 'DAY_VOTE', stateVersion: 8 } as Game;
+    const handlers = setupHandlers(cityVoteGame);
+    const { context, reply } = createGroupContext(202);
+
+    await handlers.getCommand('restore_panel')(context);
+
+    expect(handlers.restoreVotePanel).toHaveBeenCalledWith({
+      gameId: cityVoteGame.id,
+      chatId: cityVoteGame.chatId,
+      userId: '202',
+      phaseVersion: cityVoteGame.stateVersion,
+    });
+    expect(handlers.restorePanel).not.toHaveBeenCalled();
+    expect(reply).not.toHaveBeenCalled();
   });
 
   it('keeps the test-game command disabled unless the environment enables it', async () => {
