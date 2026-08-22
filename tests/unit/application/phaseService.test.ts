@@ -23,6 +23,8 @@ describe('PhaseService early night completion', () => {
     const resolve = vi.fn().mockResolvedValue({
       resolution: { attackedPlayerId: null, savedPlayerId: null, eliminatedPlayerId: null },
       eliminatedPlayer: null,
+      eliminatedPlayers: [],
+      savedPlayers: [],
     });
     const service = new PhaseService(
       { findById: vi.fn().mockResolvedValue(game), transitionPhase } as unknown as GameRepository,
@@ -72,7 +74,7 @@ describe('PhaseService early night completion', () => {
   });
 });
 
-describe('PhaseService manual day vote start', () => {
+describe('PhaseService manual city nomination start', () => {
   const config = {
     roleConfirmationDurationSeconds: 300,
     nightDurationSeconds: 120,
@@ -80,9 +82,9 @@ describe('PhaseService manual day vote start', () => {
     voteDurationSeconds: 90,
   };
 
-  it('transitions from discussion to voting with a fresh vote deadline', async () => {
+  it('transitions from discussion to nominations with a fresh vote deadline', async () => {
     const game = { id: 'game-1', phase: 'DAY_DISCUSSION', stateVersion: 7, status: 'RUNNING' } as Game;
-    const voteGame = { ...game, phase: 'DAY_VOTE', stateVersion: 8 } as Game;
+    const voteGame = { ...game, phase: 'DAY_NOMINATION', stateVersion: 8 } as Game;
     const transitionPhase = vi.fn().mockResolvedValue(voteGame);
     const service = new PhaseService(
       { transitionPhase } as unknown as GameRepository,
@@ -99,7 +101,7 @@ describe('PhaseService manual day vote start', () => {
       gameId: game.id,
       currentPhase: 'DAY_DISCUSSION',
       currentVersion: game.stateVersion,
-      nextPhase: 'DAY_VOTE',
+      nextPhase: 'DAY_NOMINATION',
       deadline: expect.any(Date),
     }));
   });
@@ -118,5 +120,87 @@ describe('PhaseService manual day vote start', () => {
     await expect(service.startDayVote({ phase: 'NIGHT' } as Game)).resolves.toBeNull();
 
     expect(transitionPhase).not.toHaveBeenCalled();
+  });
+});
+
+describe('PhaseService city vote closure', () => {
+  const config = {
+    roleConfirmationDurationSeconds: 300,
+    nightDurationSeconds: 120,
+    dayDurationSeconds: 180,
+    voteDurationSeconds: 90,
+    tieDiscussionDurationSeconds: 30,
+  };
+
+  it('converts two or more persisted nominations into the primary city vote', async () => {
+    const nominationGame = { id: 'game-1', phase: 'DAY_NOMINATION', stateVersion: 7 } as Game;
+    const primaryGame = { ...nominationGame, phase: 'DAY_VOTE', stateVersion: 8 } as Game;
+    const startPrimaryVote = vi.fn().mockResolvedValue(primaryGame);
+    const votingService = {
+      getNominatedCandidateIds: vi.fn().mockResolvedValue(['player-3', 'player-2']),
+      closeCurrentRound: vi.fn().mockResolvedValue(undefined),
+    } as unknown as VotingService;
+    const service = new PhaseService(
+      {} as GameRepository,
+      {} as NightResolutionService,
+      votingService,
+      {} as GameFinalizationService,
+      config,
+      createLogger({ logLevel: 'silent' }),
+      undefined,
+      { getActiveRound: vi.fn().mockResolvedValue({ round: { id: 'round-1' }, voteDetails: [] }), startPrimaryVote } as never,
+    );
+
+    await expect(service.closeDayVote(nominationGame)).resolves.toEqual({ game: primaryGame, kind: 'DAY_VOTE_STARTED' });
+
+    expect(startPrimaryVote).toHaveBeenCalledWith(nominationGame, ['player-3', 'player-2'], config.voteDurationSeconds);
+  });
+
+  it('starts a constrained tie discussion after a tied primary vote', async () => {
+    const voteGame = { id: 'game-1', phase: 'DAY_VOTE', stateVersion: 7 } as Game;
+    const tieGame = { ...voteGame, phase: 'DAY_TIE_DISCUSSION', stateVersion: 8 } as Game;
+    const resolution = {
+      round: { id: 'round-1', kind: 'PRIMARY' },
+      resolution: { outcome: 'TIE', eliminatedPlayerId: null, eliminatedPlayerIds: [], tiedPlayerIds: ['player-2', 'player-3'] },
+      voteDetails: [],
+    };
+    const transitionPhase = vi.fn().mockResolvedValue(tieGame);
+    const service = new PhaseService(
+      { transitionPhase } as unknown as GameRepository,
+      {} as NightResolutionService,
+      { resolveVote: vi.fn().mockResolvedValue(resolution), closeCurrentRound: vi.fn().mockResolvedValue(undefined) } as unknown as VotingService,
+      {} as GameFinalizationService,
+      config,
+      createLogger({ logLevel: 'silent' }),
+    );
+
+    await expect(service.closeDayVote(voteGame)).resolves.toEqual({ game: tieGame, kind: 'DAY_TIE_DISCUSSION_STARTED', resolution });
+
+    expect(transitionPhase).toHaveBeenCalledWith(expect.objectContaining({ nextPhase: 'DAY_TIE_DISCUSSION' }));
+  });
+
+  it('opens the final all-leave/all-stay decision after a tied revote', async () => {
+    const revoteGame = { id: 'game-1', phase: 'DAY_REVOTE', stateVersion: 9 } as Game;
+    const finalGame = { ...revoteGame, phase: 'DAY_FINAL_DECISION', stateVersion: 10 } as Game;
+    const resolution = {
+      round: { id: 'round-2', kind: 'REVOTE' },
+      resolution: { outcome: 'TIE', eliminatedPlayerId: null, eliminatedPlayerIds: [], tiedPlayerIds: ['player-2', 'player-3'] },
+      voteDetails: [],
+    };
+    const startFinalDecision = vi.fn().mockResolvedValue(finalGame);
+    const service = new PhaseService(
+      {} as GameRepository,
+      {} as NightResolutionService,
+      { resolveVote: vi.fn().mockResolvedValue(resolution), closeCurrentRound: vi.fn().mockResolvedValue(undefined) } as unknown as VotingService,
+      {} as GameFinalizationService,
+      config,
+      createLogger({ logLevel: 'silent' }),
+      undefined,
+      { startFinalDecision } as never,
+    );
+
+    await expect(service.closeDayVote(revoteGame)).resolves.toEqual({ game: finalGame, kind: 'DAY_FINAL_DECISION_STARTED', resolution });
+
+    expect(startFinalDecision).toHaveBeenCalledWith(revoteGame, ['player-2', 'player-3'], config.voteDurationSeconds);
   });
 });

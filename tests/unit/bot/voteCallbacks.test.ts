@@ -18,8 +18,9 @@ describe('day vote callbacks', () => {
       kind: 'DAY_VOTE_RESOLVED',
       game: nightGame,
       resolution: {
-        resolution: { outcome: 'ELIMINATION', eliminatedPlayerId: 'player-2' },
-        eliminatedPlayer: { id: 'player-2', displayName: 'Игрок 2' },
+        resolution: { outcome: 'ELIMINATION', eliminatedPlayerIds: ['player-2'] },
+        eliminatedPlayers: [{ id: 'player-2', displayName: 'Игрок 2' }],
+        alibiedPlayers: [],
         voteDetails: [
           { voterDisplayName: 'Игрок 1', targetDisplayName: 'Игрок 2' },
           { voterDisplayName: 'Игрок 3', targetDisplayName: null },
@@ -40,7 +41,7 @@ describe('day vote callbacks', () => {
       bot,
       { castVote } as never,
       { renderVote: vi.fn().mockResolvedValue({ text: '🗳️ Дневное голосование', replyMarkup: { inline_keyboard: [[{ text: 'Игрок 2', callback_data: 'v:game-1:7:0' }]] } }) } as never,
-      { closeDayVote, recordControlMessage } as never,
+      { closeDayVote, recordControlMessage, getCurrentGame: vi.fn().mockResolvedValue(nightGame) } as never,
       { deliverNightPanels } as never,
       { playVirtualNightActions } as never,
       createLogger({ logLevel: 'silent' }),

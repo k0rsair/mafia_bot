@@ -5,6 +5,7 @@ import { EphemeralPanelError, type EphemeralPanelService, type RoleConfirmationR
 import type { GameFinalizationService } from '../../application/GameFinalizationService.js';
 import type { PhaseService } from '../../application/PhaseService.js';
 import type { DayService } from '../../application/DayService.js';
+import type { VotingService } from '../../application/VotingService.js';
 import { LobbyError, type LobbyService, type LobbySnapshot } from '../../application/LobbyService.js';
 import { NightActionError, type NightActionService } from '../../application/NightActionService.js';
 import type { TestGameService } from '../../application/TestGameService.js';
@@ -13,21 +14,23 @@ import type { AppLogger } from '../../observability/logger.js';
 import { canManageGame, isGameGroup } from '../authorization/chatPermissions.js';
 import { parseLobbyCallback } from '../callbacks/callbackData.js';
 import { publishNightCompletion } from '../callbacks/ephemeralCallbacks.js';
+import { publishVoteClosure } from '../callbacks/voteCallbacks.js';
 import type { TelegramEphemeralAdapter } from '../telegram/ephemeral.js';
 import { renderLobby } from '../views/lobbyView.js';
-import { renderNightControl, renderRoleControl } from '../views/phaseView.js';
+import { renderNightControl, renderProstituteNightControl, renderRoleControl } from '../views/phaseView.js';
 
 type LobbyHandlerDependencies = Readonly<{
   lobbyService: LobbyService;
   gameService: GameService;
   phaseService: PhaseService;
   dayService: DayService;
+  votingService: VotingService;
   gameFinalizationService: GameFinalizationService;
   ephemeralPanelService: EphemeralPanelService;
   nightActionService: NightActionService;
   ephemeralAdapter: TelegramEphemeralAdapter;
   testGameService: TestGameService;
-  config: Pick<AppConfig, 'lobbyMaxPlayers' | 'testGameEnabled'>;
+  config: Pick<AppConfig, 'lobbyMaxPlayers' | 'testGameEnabled' | 'roleDisplayNames'>;
   logger: AppLogger;
 }>;
 
@@ -95,7 +98,7 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
       return;
     }
 
-    const placeholder = await context.reply('🧪 Создаю тестовую игру с четырьмя виртуальными игроками…');
+    const placeholder = await context.reply('🧪 Создаю тестовую игру с восемью виртуальными игроками…');
     try {
       const game = await dependencies.testGameService.createTestGame({
         chatId: String(context.chat.id),
@@ -106,11 +109,11 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
         lobbyMessageId: placeholder.message_id,
       });
       const view = renderRoleControl();
-      await context.api.editMessageText(context.chat.id, placeholder.message_id, `🧪 Тестовая игра готова. Четыре виртуальных игрока уже подтвердили роли.\n\n${view.text}`, { reply_markup: view.replyMarkup });
+      await context.api.editMessageText(context.chat.id, placeholder.message_id, `🧪 Тестовая игра готова. Восемь виртуальных игроков уже подтвердили роли.\n\n${view.text}`, { reply_markup: view.replyMarkup });
       await dependencies.gameService.recordControlMessage(game.id, placeholder.message_id);
       const delivery = await dependencies.ephemeralPanelService.deliverRolePanels(game);
       await publishAutomaticRoleDeliveryCompletion(context, delivery, dependencies);
-      dependencies.logger.info({ gameId: game.id, chatId: game.chatId, virtualPlayerCount: 4 }, '[registerLobbyHandlers.testgame] Test game started');
+      dependencies.logger.info({ gameId: game.id, chatId: game.chatId, virtualPlayerCount: 8 }, '[registerLobbyHandlers.testgame] Test game started');
     } catch (error) {
       dependencies.logger.error({ chatId: String(context.chat.id), error }, '[registerLobbyHandlers.testgame] Failed to start test game');
       await context.api.editMessageText(context.chat.id, placeholder.message_id, `⚠️ ${toUserMessage(error)}`);
@@ -205,11 +208,19 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
       return;
     }
 
-    dependencies.logger.info({ gameId: voteGame.id, chatId: voteGame.chatId }, '[FIX:manual-vote-start] Organizer started day vote');
+    dependencies.logger.info({ gameId: voteGame.id, chatId: voteGame.chatId, phase: voteGame.phase }, '[registerLobbyHandlers.startvote] Organizer started city nominations');
     await dependencies.testGameService.castVirtualVotes(voteGame);
     const view = await dependencies.dayService.renderVote(voteGame);
-    const controlMessage = await context.reply(`🗳️ Организатор завершил обсуждение. Голосование начинается!\n\n${view.text}`, { reply_markup: view.replyMarkup });
+    const controlMessage = await context.reply(`📣 Организатор завершил обсуждение. Начинаются номинации!\n\n${view.text}`, { reply_markup: view.replyMarkup });
     await dependencies.phaseService.recordControlMessage(voteGame.id, controlMessage.message_id);
+  });
+
+  bot.command('closenominations', async (context) => {
+    await closeCityRoundFromContext(context, dependencies, 'DAY_NOMINATION');
+  });
+
+  bot.command('closevote', async (context) => {
+    await closeCityRoundFromContext(context, dependencies, 'DAY_VOTE', 'DAY_REVOTE', 'DAY_FINAL_DECISION');
   });
 
   bot.command('cancelgame', async (context) => {
@@ -303,7 +314,7 @@ export function registerLobbyHandlers(bot: Bot<Context>, dependencies: LobbyHand
 async function republishCurrentControl(
   context: Context,
   game: Readonly<{ id: string; phase: string; stateVersion: number }>,
-  dependencies: Pick<LobbyHandlerDependencies, 'dayService' | 'phaseService'>,
+  dependencies: Pick<LobbyHandlerDependencies, 'config' | 'dayService' | 'phaseService'>,
 ): Promise<void> {
   if (game.phase === 'ROLE_CONFIRMATION') {
     const view = renderRoleControl();
@@ -311,13 +322,13 @@ async function republishCurrentControl(
     await dependencies.phaseService.recordControlMessage(game.id, controlMessage.message_id);
     return;
   }
-  if (game.phase === 'NIGHT') {
-    const view = renderNightControl();
+  if (game.phase === 'NIGHT_PROSTITUTE' || game.phase === 'NIGHT') {
+    const view = game.phase === 'NIGHT_PROSTITUTE' ? renderProstituteNightControl(dependencies.config.roleDisplayNames) : renderNightControl();
     const controlMessage = await context.reply(`ℹ️ Фаза: ночь.\n\n${view.text}`, { reply_markup: view.replyMarkup });
     await dependencies.phaseService.recordControlMessage(game.id, controlMessage.message_id);
     return;
   }
-  if (game.phase === 'DAY_VOTE') {
+  if (game.phase === 'DAY_NOMINATION' || game.phase === 'DAY_VOTE' || game.phase === 'DAY_REVOTE' || game.phase === 'DAY_FINAL_DECISION') {
     const gameForView = await dependencies.phaseService.getCurrentGame(game.id);
     if (gameForView !== null) {
       const view = await dependencies.dayService.renderVote(gameForView);
@@ -326,7 +337,46 @@ async function republishCurrentControl(
       return;
     }
   }
+  if (game.phase === 'DAY_TIE_DISCUSSION') {
+    const controlMessage = await context.reply('ℹ️ Фаза: 30-секундное обсуждение ничьей. После него начнётся ограниченный перевыбор.');
+    await dependencies.phaseService.recordControlMessage(game.id, controlMessage.message_id);
+    return;
+  }
   await context.reply(`ℹ️ Игра идёт. Текущая фаза: ${game.phase}.`);
+}
+
+async function closeCityRoundFromContext(
+  context: Context,
+  dependencies: LobbyHandlerDependencies,
+  ...allowedPhases: readonly ('DAY_NOMINATION' | 'DAY_VOTE' | 'DAY_REVOTE' | 'DAY_FINAL_DECISION')[]
+): Promise<void> {
+  if (!isGameGroup(context) || context.chat === undefined || context.from === undefined) {
+    await context.reply('👥 Эта команда доступна только в игровом групповом чате.');
+    return;
+  }
+  const game = await dependencies.lobbyService.getActiveGame(String(context.chat.id));
+  if (game === null || !allowedPhases.includes(game.phase as (typeof allowedPhases)[number])) {
+    await context.reply('ℹ️ Этот городской раунд сейчас не открыт.');
+    return;
+  }
+  if (!(await canManageGame(context, game.creatorId, dependencies.logger))) {
+    await context.reply('🛡️ Закрыть городской раунд может только автор лобби или администратор чата.');
+    return;
+  }
+  const closure = await dependencies.phaseService.closeDayVote(game);
+  if (closure === null) {
+    await context.reply('⚠️ Фаза уже изменилась. Проверьте /mafia_status.');
+    return;
+  }
+  await publishVoteClosure(
+    context,
+    closure,
+    dependencies.dayService,
+    dependencies.phaseService,
+    dependencies.nightActionService,
+    dependencies.testGameService,
+    dependencies.config.roleDisplayNames,
+  );
 }
 
 async function startGameFromContext(context: Context, dependencies: LobbyHandlerDependencies, expectedGameId?: string): Promise<void> {
@@ -381,9 +431,30 @@ async function publishAutomaticRoleDeliveryCompletion(
     return;
   }
 
+  if (result.nightGame.phase === 'NIGHT_PROSTITUTE') {
+    const regularNight = await dependencies.testGameService.playVirtualProstituteAction(result.nightGame);
+    if (regularNight !== null) {
+      const testCompletion = await dependencies.testGameService.playVirtualNightActions(regularNight);
+      if (testCompletion !== null) {
+        await publishNightCompletion(context, testCompletion, dependencies.config.roleDisplayNames);
+        return;
+      }
+      const view = renderNightControl();
+      const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
+      await dependencies.gameService.recordControlMessage(regularNight.id, controlMessage.message_id);
+      await dependencies.nightActionService.deliverNightPanels(regularNight);
+      return;
+    }
+    const view = renderProstituteNightControl(dependencies.config.roleDisplayNames);
+    const controlMessage = await context.reply(view.text, { reply_markup: view.replyMarkup });
+    await dependencies.gameService.recordControlMessage(result.nightGame.id, controlMessage.message_id);
+    await dependencies.nightActionService.deliverNightPanels(result.nightGame);
+    return;
+  }
+
   const testCompletion = await dependencies.testGameService.playVirtualNightActions(result.nightGame);
   if (testCompletion !== null) {
-    await publishNightCompletion(context, testCompletion);
+    await publishNightCompletion(context, testCompletion, dependencies.config.roleDisplayNames);
     return;
   }
 

@@ -45,7 +45,7 @@ export function createBot(config: AppConfig, logger: AppLogger, dependencies: Bo
   bot.command('help', async (context) => {
     logger.info({ chatId: String(context.chat.id), userId: String(context.from?.id) }, '[createBot.help] Received /help command');
     const testGameCommand = config.testGameEnabled ? ', /testgame' : '';
-    await context.reply(`🎲 Команды: /mafia, /startgame, /startvote, /mafia_status, /roles_pending, /restore_panel, /extendroles и /cancelgame${testGameCommand}. Тайные роли и действия откроются в скрытой панели прямо в группе.`);
+    await context.reply(`🎲 Команды: /mafia, /startgame, /startvote, /closenominations, /closevote, /mafia_status, /roles_pending, /restore_panel, /extendroles и /cancelgame${testGameCommand}. Тайные роли и действия откроются в скрытой панели прямо в группе.`);
   });
 
   registerLobbyHandlers(bot, {
@@ -53,8 +53,8 @@ export function createBot(config: AppConfig, logger: AppLogger, dependencies: Bo
     config,
     logger,
   });
-  registerEphemeralCallbacks(bot, dependencies.ephemeralPanelService, dependencies.nightActionService, dependencies.phaseService, dependencies.testGameService, logger);
-  registerVoteCallbacks(bot, dependencies.votingService, dependencies.dayService, dependencies.phaseService, dependencies.nightActionService, dependencies.testGameService, logger);
+  registerEphemeralCallbacks(bot, dependencies.ephemeralPanelService, dependencies.nightActionService, dependencies.phaseService, dependencies.testGameService, logger, config.roleDisplayNames);
+  registerVoteCallbacks(bot, dependencies.votingService, dependencies.dayService, dependencies.phaseService, dependencies.nightActionService, dependencies.testGameService, logger, config.roleDisplayNames);
 
   bot.catch((error) => {
     logger.error(

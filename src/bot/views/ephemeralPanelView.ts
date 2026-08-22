@@ -1,12 +1,11 @@
 import type { InlineKeyboardMarkup } from 'grammy/types';
 
-import { encodeGameCallback } from '../callbacks/callbackData.js';
-import { encodeNightTargetCallback } from '../callbacks/callbackData.js';
-import type { Role } from '../../domain/game/types.js';
+import { encodeDonCheckCallback, encodeGameCallback, encodeManiacSkipCallback, encodeNightTargetCallback } from '../callbacks/callbackData.js';
+import { DEFAULT_ROLE_DISPLAY_NAMES, type NightActionType, type Role, type RoleDisplayNames } from '../../domain/game/types.js';
 
-export function renderRolePanel(input: Readonly<{ role: Role }>): Readonly<{ text: string }> {
+export function renderRolePanel(input: Readonly<{ role: Role; roleDisplayNames?: RoleDisplayNames }>): Readonly<{ text: string }> {
   return {
-    text: `${roleDescription(input.role)}\n\n✅ Получение роли засчитано автоматически.`,
+    text: `${roleDescription(input.role, input.roleDisplayNames ?? DEFAULT_ROLE_DISPLAY_NAMES)}\n\n✅ Получение роли засчитано автоматически.`,
   };
 }
 
@@ -14,6 +13,8 @@ export function renderNightPanel(input: Readonly<{
   gameId: string;
   phaseVersion: number;
   candidates: readonly Readonly<{ id: string; displayName: string; targetIndex: number }>[];
+  actionType?: NightActionType;
+  roleDisplayNames?: RoleDisplayNames;
 }>): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
   const choices = input.candidates.map((candidate) =>
     ({
@@ -23,7 +24,7 @@ export function renderNightPanel(input: Readonly<{
   );
 
   return {
-    text: '🌙 Выберите цель ночного действия. До конца ночи выбор можно изменить.',
+    text: nightPrompt(input.actionType ?? 'COMMISSIONER_CHECK', input.roleDisplayNames ?? DEFAULT_ROLE_DISPLAY_NAMES),
     replyMarkup: { inline_keyboard: chunk(choices, 2) },
   };
 }
@@ -69,23 +70,89 @@ export function renderNightChoiceAccepted(): string {
 }
 
 export function renderCommissionerResult(displayName: string, isMafia: boolean): string {
-  return `🔍 Проверка этой ночью: ${displayName} — ${isMafia ? 'МАФИЯ' : 'не мафия'}.`;
+  return `🔍 Проверка Шерифа: ${displayName} — ${isMafia ? 'МАФИЯ' : 'не мафия'}.`;
+}
+
+export function renderDonCheckResult(displayName: string, isSheriff: boolean): string {
+  return `👑 Проверка Дона: ${displayName} — ${isSheriff ? 'ШЕРИФ' : 'не шериф'}.`;
+}
+
+export function renderDonCheckPanel(input: Readonly<{
+  gameId: string;
+  phaseVersion: number;
+  candidates: readonly Readonly<{ displayName: string; targetIndex: number }>[];
+}>): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
+  return {
+    text: '👑 Отдельная проверка Дона: выберите живого игрока, кроме себя. Результат увидите только вы.',
+    replyMarkup: { inline_keyboard: chunk(input.candidates.map((candidate) => ({
+      text: candidate.displayName.slice(0, 48),
+      callback_data: encodeDonCheckCallback(input.gameId, input.phaseVersion, candidate.targetIndex),
+    })), 2) },
+  };
+}
+
+export function renderManiacPanel(input: Readonly<{
+  gameId: string;
+  phaseVersion: number;
+  candidates: readonly Readonly<{ displayName: string; targetIndex: number }>[];
+}>): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
+  return {
+    text: '🔪 Выберите жертву или пропустите ход. Выбор окончательный.',
+    replyMarkup: {
+      inline_keyboard: [
+        ...chunk(input.candidates.map((candidate) => ({
+          text: candidate.displayName.slice(0, 48),
+          callback_data: encodeNightTargetCallback(input.gameId, input.phaseVersion, candidate.targetIndex),
+        })), 2),
+        [{ text: '🤫 Пропустить ход', callback_data: encodeManiacSkipCallback(input.gameId, input.phaseVersion) }],
+      ],
+    },
+  };
+}
+
+export function renderNightActionBlocked(): string {
+  return '⛔ Ваше личное ночное действие заблокировано. Дождитесь рассвета.';
 }
 
 export function renderNoNightAction(): string {
   return '🌙 Ночью у вашей роли нет действия. Дождитесь рассвета.';
 }
 
-function roleDescription(role: Role): string {
+function roleDescription(role: Role, roleDisplayNames: RoleDisplayNames): string {
   switch (role) {
     case 'MAFIA':
       return '🕶️ Ваша роль: МАФИЯ\nНочью откройте скрытую панель и выберите жертву. Днём не выдавайте себя.';
     case 'COMMISSIONER':
-      return '🔍 Ваша роль: КОМИССАР\nНочью проверьте одного другого живого игрока. Ответ увидите только вы.';
+      return '🔍 Ваша роль: ШЕРИФ\nНочью проверьте одного другого живого игрока. Ответ увидите только вы.';
     case 'DOCTOR':
-      return '💉 Ваша роль: ДОКТОР\nНочью выберите, кого спасти. Себя спасать разрешено.';
+      return '💉 Ваша роль: ДОКТОР\nНочью лечите одного игрока от выстрела мафии. Нельзя лечить одну цель две ночи подряд; себя — только один раз за игру.';
     case 'CIVILIAN':
       return '🕊️ Ваша роль: МИРНЫЙ ЖИТЕЛЬ\nОбсуждайте днём и голосуйте. Ночью действия нет.';
+    case 'DON':
+      return '👑 Ваша роль: ДОН\nНочью участвуйте в совете мафии и проверяйте одного игрока на Шерифа.';
+    case 'PROSTITUTE':
+      return `💋 Ваша роль: ${roleDisplayNames.prostitute.toLocaleUpperCase('ru')}\nВы действуете первой: выберите живого игрока, кроме себя. Нельзя приходить к одной цели две ночи подряд.`;
+    case 'MANIAC':
+      return '🔪 Ваша роль: МАНЬЯК\nНочью выберите жертву или пропустите ход. Вы играете один.';
+  }
+}
+
+function nightPrompt(actionType: NightActionType, roleDisplayNames: RoleDisplayNames): string {
+  switch (actionType) {
+    case 'PROSTITUTE_VISIT':
+      return `💋 Вы действуете первой как ${roleDisplayNames.prostitute}. Выберите живого игрока, кроме себя. Нельзя ходить к одному человеку две ночи подряд.`;
+    case 'DOCTOR_SAVE':
+      return '💉 Выберите, кого лечить. Одного человека нельзя лечить две ночи подряд; себя можно лечить один раз за игру.';
+    case 'COMMISSIONER_CHECK':
+      return '🔍 Выберите живого игрока для проверки. Результат увидите только вы.';
+    case 'MANIAC_KILL':
+      return '🔪 Выберите живую жертву. Выбор окончательный.';
+    case 'MAFIA_KILL':
+      return '🕶️ Выберите цель совета мафии.';
+    case 'DON_CHECK':
+      return '👑 Выберите игрока для проверки Дона.';
+    case 'MANIAC_SKIP':
+      return '🤫 Пропустите ход Маньяка.';
   }
 }
 

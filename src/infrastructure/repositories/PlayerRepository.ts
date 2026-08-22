@@ -154,8 +154,26 @@ export class PlayerRepository {
     this.logger.info({ gameId, playerId }, '[PlayerRepository.eliminatePlayer] Player eliminated');
     return true;
   }
+
+  public async eliminatePlayers(gameId: string, playerIds: readonly string[]): Promise<number> {
+    const uniquePlayerIds = [...new Set(playerIds)];
+    if (uniquePlayerIds.length === 0) {
+      return 0;
+    }
+    this.logger.debug({ gameId, playerCount: uniquePlayerIds.length }, '[PlayerRepository.eliminatePlayers] Eliminating resolved players');
+    const update = await this.prisma.player.updateMany({
+      where: { gameId, id: { in: uniquePlayerIds }, status: DbPlayerStatus.ALIVE },
+      data: { status: DbPlayerStatus.DEAD, eliminatedAt: new Date() },
+    });
+    this.logger.info({ gameId, eliminatedPlayerCount: update.count }, '[PlayerRepository.eliminatePlayers] Resolved players eliminated');
+    return update.count;
+  }
 }
 
 function toDbRole(role: Role): DbRole {
-  return DbRole[role];
+  const databaseRole = DbRole[role as keyof typeof DbRole];
+  if (databaseRole === undefined) {
+    throw new Error(`Role ${role} is not available in the current database schema`);
+  }
+  return databaseRole;
 }

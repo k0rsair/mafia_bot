@@ -75,7 +75,7 @@ describe('ephemeral role-panel callbacks', () => {
       bot,
       {} as never,
       { submitTarget } as never,
-      { completeNightIfAllActionsCompleted } as never,
+      { getCurrentGame: vi.fn().mockResolvedValue({ id: 'game-1', phase: 'NIGHT', stateVersion: 7 }), completeNightIfAllActionsCompleted } as never,
       {} as never,
       createLogger({ logLevel: 'silent' }),
     );

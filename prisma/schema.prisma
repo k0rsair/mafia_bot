@@ -17,9 +17,14 @@ enum GameStatus {
 enum GamePhase {
   LOBBY
   ROLE_CONFIRMATION
+  NIGHT_PROSTITUTE
   NIGHT
   DAY_DISCUSSION
+  DAY_NOMINATION
   DAY_VOTE
+  DAY_TIE_DISCUSSION
+  DAY_REVOTE
+  DAY_FINAL_DECISION
   FINISHED
   CANCELLED
 }
@@ -33,8 +38,11 @@ enum PlayerStatus {
 
 enum Role {
   MAFIA
+  DON
   COMMISSIONER
   DOCTOR
+  PROSTITUTE
+  MANIAC
   CIVILIAN
 }
 
@@ -42,6 +50,21 @@ enum NightActionType {
   MAFIA_KILL
   DOCTOR_SAVE
   COMMISSIONER_CHECK
+  PROSTITUTE_VISIT
+  DON_CHECK
+  MANIAC_KILL
+  MANIAC_SKIP
+}
+
+enum VoteRoundKind {
+  NOMINATION
+  PRIMARY
+  REVOTE
+  FINAL_DECISION
+}
+
+enum DayEffectKind {
+  PROSTITUTE_ALIBI
 }
 
 enum PhaseJobKind {
@@ -73,6 +96,8 @@ model Game {
   chat             GameChat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
   players          Player[]
   votes            Vote[]
+  voteRounds       VoteRound[]
+  dayEffects       DayEffect[]
   nightActions     NightAction[]
   phaseJobs        PhaseJob[]
 
@@ -98,26 +123,30 @@ model Player {
   votesReceived        Vote[]        @relation("VoteTarget")
   nightActions         NightAction[] @relation("NightActionActor")
   nightActionsTargeted NightAction[] @relation("NightActionTarget")
+  dayEffects           DayEffect[]   @relation("DayEffectTarget")
 
   @@unique([gameId, userId])
   @@index([gameId, status])
 }
 
 model Vote {
-  id             String   @id @default(cuid())
+  id             String     @id @default(cuid())
   gameId         String
   phaseVersion   Int
   voterPlayerId  String
   targetPlayerId String?
-  isSkip         Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  game           Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  voter          Player   @relation("VoteCaster", fields: [voterPlayerId], references: [id], onDelete: Cascade)
-  target         Player?  @relation("VoteTarget", fields: [targetPlayerId], references: [id], onDelete: SetNull)
+  voteRoundId    String?
+  isSkip         Boolean    @default(false)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  game           Game       @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  voter          Player     @relation("VoteCaster", fields: [voterPlayerId], references: [id], onDelete: Cascade)
+  target         Player?    @relation("VoteTarget", fields: [targetPlayerId], references: [id], onDelete: SetNull)
+  voteRound      VoteRound? @relation(fields: [voteRoundId], references: [id], onDelete: SetNull)
 
   @@unique([gameId, phaseVersion, voterPlayerId])
   @@index([gameId, phaseVersion])
+  @@index([voteRoundId])
 }
 
 model NightAction {
@@ -126,16 +155,47 @@ model NightAction {
   phaseVersion   Int
   actionType     NightActionType
   actorPlayerId  String
-  targetPlayerId String
+  targetPlayerId String?
   confirmedAt    DateTime?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   game           Game            @relation(fields: [gameId], references: [id], onDelete: Cascade)
   actor          Player          @relation("NightActionActor", fields: [actorPlayerId], references: [id], onDelete: Cascade)
-  target         Player          @relation("NightActionTarget", fields: [targetPlayerId], references: [id], onDelete: Cascade)
+  target         Player?         @relation("NightActionTarget", fields: [targetPlayerId], references: [id], onDelete: Cascade)
 
   @@unique([gameId, phaseVersion, actorPlayerId, actionType])
   @@index([gameId, phaseVersion])
+}
+
+model VoteRound {
+  id                 String        @id @default(cuid())
+  gameId             String
+  phaseVersion       Int
+  sequence           Int
+  kind               VoteRoundKind
+  candidatePlayerIds String[]
+  openedAt           DateTime      @default(now())
+  closedAt           DateTime?
+  game               Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  votes              Vote[]
+
+  @@unique([gameId, phaseVersion, sequence])
+  @@index([gameId, phaseVersion, closedAt])
+}
+
+model DayEffect {
+  id           String        @id @default(cuid())
+  gameId       String
+  playerId     String
+  kind         DayEffectKind
+  phaseVersion Int
+  consumedAt   DateTime?
+  createdAt    DateTime      @default(now())
+  game         Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  player       Player        @relation("DayEffectTarget", fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, playerId, kind, phaseVersion])
+  @@index([gameId, kind, consumedAt])
 }
 
 model PhaseJob {

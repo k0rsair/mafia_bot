@@ -28,7 +28,7 @@ describe('EphemeralPanelService panel restoration', () => {
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
       chatId: game.chatId,
       receiverUserId: player.userId,
-      text: expect.stringContaining('КОМИССАР'),
+      text: expect.stringContaining('ШЕРИФ'),
     }));
     expect(sendText.mock.calls[0]?.[0]).not.toHaveProperty('callbackQueryId');
     expect(sendText.mock.calls[0]?.[0]).not.toHaveProperty('replyMarkup');

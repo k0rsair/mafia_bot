@@ -229,5 +229,9 @@ function toDbStatus(status: GameStatus): DbGameStatus {
 }
 
 function toDbRole(role: RoleAssignment['role']): DbRole {
-  return DbRole[role];
+  const databaseRole = DbRole[role as keyof typeof DbRole];
+  if (databaseRole === undefined) {
+    throw new Error(`Role ${role} is not available in the current database schema`);
+  }
+  return databaseRole;
 }

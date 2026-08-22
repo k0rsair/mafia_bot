@@ -1,8 +1,11 @@
 type NightEventInput = Readonly<{
   gameId: string;
   phaseVersion: number;
-  eliminatedDisplayName: string | null;
-  savedDisplayName: string | null;
+  eliminatedDisplayNames?: readonly string[];
+  savedDisplayNames?: readonly string[];
+  eliminatedDisplayName?: string | null;
+  savedDisplayName?: string | null;
+  eliminatedManiacDisplayName?: string | null;
 }>;
 
 const ELIMINATION_MESSAGES = [
@@ -28,13 +31,35 @@ const QUIET_NIGHT_MESSAGES = [
 ];
 
 export function renderNightEvent(input: NightEventInput): string {
-  if (input.eliminatedDisplayName !== null) {
-    return selectMessage(ELIMINATION_MESSAGES, input, input.eliminatedDisplayName, 'elimination');
+  const eliminatedDisplayNames = input.eliminatedDisplayNames ?? (input.eliminatedDisplayName === null || input.eliminatedDisplayName === undefined ? [] : [input.eliminatedDisplayName]);
+  const savedDisplayNames = input.savedDisplayNames ?? (input.savedDisplayName === null || input.savedDisplayName === undefined ? [] : [input.savedDisplayName]);
+  if (eliminatedDisplayNames.length > 0) {
+    const elimination = eliminatedDisplayNames.length === 1
+      ? selectMessage(ELIMINATION_MESSAGES, input, eliminatedDisplayNames[0], 'elimination')
+      : `🌅 Кровавый рассвет. Ночь забрала жителей: ${joinNames(eliminatedDisplayNames)}.`;
+    const rescue = savedDisplayNames.length > 0 ? `\n🩺 ${savedSummary(savedDisplayNames)}` : '';
+    const maniacReveal = input.eliminatedManiacDisplayName === null || input.eliminatedManiacDisplayName === undefined
+      ? ''
+      : `\n🔪 Среди погибших был Маньяк — ${input.eliminatedManiacDisplayName}. Его роль раскрыта.`;
+    return `${elimination}${rescue}${maniacReveal}`;
   }
-  if (input.savedDisplayName !== null) {
-    return selectMessage(RESCUE_MESSAGES, input, input.savedDisplayName, 'rescue');
+  if (savedDisplayNames.length > 0) {
+    return savedDisplayNames.length === 1
+      ? selectMessage(RESCUE_MESSAGES, input, savedDisplayNames[0], 'rescue')
+      : `🩺 Ночной налёт не удался: ${joinNames(savedDisplayNames)} встретили рассвет живыми. Чья-то помощь оказалась быстрее.`;
   }
   return selectMessage(QUIET_NIGHT_MESSAGES, input, undefined, 'quiet');
+}
+
+function savedSummary(names: readonly string[]): string {
+  return names.length === 1
+    ? `${names[0]} встретил рассвет живым благодаря своевременной помощи.`
+    : `${joinNames(names)} встретили рассвет живыми благодаря своевременной помощи.`;
+}
+
+function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? 'житель';
+  return `${names.slice(0, -1).join(', ')} и ${names[names.length - 1]}`;
 }
 
 function selectMessage(

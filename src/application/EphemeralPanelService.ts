@@ -5,6 +5,7 @@ import type { AppLogger } from '../observability/logger.js';
 import type { TelegramEphemeralAdapter } from '../bot/telegram/ephemeral.js';
 import type { GameRepository } from '../infrastructure/repositories/GameRepository.js';
 import type { PlayerRepository } from '../infrastructure/repositories/PlayerRepository.js';
+import { DEFAULT_ROLE_DISPLAY_NAMES, type RoleDisplayNames } from '../domain/game/types.js';
 import type { PhaseService } from './PhaseService.js';
 import type { NightActionService } from './NightActionService.js';
 import { isVirtualTestPlayer } from './TestGameService.js';
@@ -43,11 +44,12 @@ export class EphemeralPanelService {
     private readonly ephemeralAdapter: TelegramEphemeralAdapter,
     private readonly logger: AppLogger,
     private readonly callbackGuard: CallbackGuardService = new CallbackGuardService(),
+    private readonly roleDisplayNames: RoleDisplayNames = DEFAULT_ROLE_DISPLAY_NAMES,
   ) {}
 
   public async openPanel(input: PanelCallbackInput): Promise<RoleConfirmationResult> {
     const game = await this.gameRepository.findById(input.gameId);
-    if (game?.phase === 'NIGHT' && game.stateVersion === input.phaseVersion) {
+    if ((game?.phase === 'NIGHT' || game?.phase === 'NIGHT_PROSTITUTE') && game.stateVersion === input.phaseVersion) {
       await this.nightActionService.openNightPanel(input);
       return { nightStarted: false };
     }
@@ -99,7 +101,7 @@ export class EphemeralPanelService {
     }
 
     const panelInput = { ...input, phaseVersion: game.stateVersion };
-    if (game.phase === 'NIGHT') {
+    if (game.phase === 'NIGHT' || game.phase === 'NIGHT_PROSTITUTE') {
       await this.nightActionService.openNightPanel(panelInput);
       this.logger.info({ gameId: game.id, phase: game.phase }, '[EphemeralPanelService.restorePanel] Personal panel restored');
       return;
@@ -119,7 +121,7 @@ export class EphemeralPanelService {
       throw new EphemeralPanelError('Роль ещё не назначена. Попробуйте позже.');
     }
 
-    const panel = renderRolePanel({ role: player.role });
+    const panel = renderRolePanel({ role: player.role, roleDisplayNames: this.roleDisplayNames });
     await this.ephemeralAdapter.sendText({
       chatId: input.chatId,
       receiverUserId: input.userId,

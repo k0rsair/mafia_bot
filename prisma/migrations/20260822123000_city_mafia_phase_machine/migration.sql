@@ -1,0 +1,6 @@
+-- Keep phase values additive so existing games retain their stored phase and remain recoverable.
+ALTER TYPE "GamePhase" ADD VALUE IF NOT EXISTS 'NIGHT_PROSTITUTE';
+ALTER TYPE "GamePhase" ADD VALUE IF NOT EXISTS 'DAY_NOMINATION';
+ALTER TYPE "GamePhase" ADD VALUE IF NOT EXISTS 'DAY_TIE_DISCUSSION';
+ALTER TYPE "GamePhase" ADD VALUE IF NOT EXISTS 'DAY_REVOTE';
+ALTER TYPE "GamePhase" ADD VALUE IF NOT EXISTS 'DAY_FINAL_DECISION';
