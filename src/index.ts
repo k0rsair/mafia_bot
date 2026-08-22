@@ -20,11 +20,13 @@ import { PhaseJobRepository } from './infrastructure/repositories/PhaseJobReposi
 import { NightActionRepository } from './infrastructure/repositories/NightActionRepository.js';
 import { PlayerRepository } from './infrastructure/repositories/PlayerRepository.js';
 import { VoteRepository } from './infrastructure/repositories/VoteRepository.js';
+import { VoteRoundRepository } from './infrastructure/repositories/VoteRoundRepository.js';
+import { DayEffectRepository } from './infrastructure/repositories/DayEffectRepository.js';
 import { createLogger } from './observability/logger.js';
 import { TelegramEphemeralAdapter } from './bot/telegram/ephemeral.js';
 import { renderDayDiscussion } from './bot/views/dayView.js';
 import { renderNightEvent } from './bot/views/nightEventView.js';
-import { renderNightControl, renderRoleControl } from './bot/views/phaseView.js';
+import { renderNightControl, renderProstituteNightControl, renderRoleControl } from './bot/views/phaseView.js';
 import { renderClosedVoteView } from './bot/views/voteView.js';
 import { renderFinalView } from './bot/views/finalView.js';
 import { registerCommandMenu } from './bot/commands/commandMenu.js';
@@ -38,13 +40,15 @@ async function main(): Promise<void> {
   const phaseJobRepository = new PhaseJobRepository(prisma, logger);
   const nightActionRepository = new NightActionRepository(prisma, logger);
   const voteRepository = new VoteRepository(prisma, logger);
+  const voteRoundRepository = new VoteRoundRepository(prisma, logger);
+  const dayEffectRepository = new DayEffectRepository(prisma, logger);
   const lobbyService = new LobbyService(gameRepository, playerRepository, logger, config.lobbyMaxPlayers);
   const gameService = new GameService(gameRepository, playerRepository, lobbyService, config, logger);
-  const nightResolutionService = new NightResolutionService(playerRepository, nightActionRepository, logger);
-  const votingService = new VotingService(gameRepository, playerRepository, voteRepository, logger);
+  const nightResolutionService = new NightResolutionService(playerRepository, nightActionRepository, logger, dayEffectRepository);
+  const votingService = new VotingService(gameRepository, playerRepository, voteRepository, logger, undefined, voteRoundRepository, dayEffectRepository);
   const gameFinalizationService = new GameFinalizationService(gameRepository, playerRepository, logger);
-  const dayService = new DayService(playerRepository, voteRepository, logger);
-  const phaseService = new PhaseService(gameRepository, nightResolutionService, votingService, gameFinalizationService, config, logger, playerRepository);
+  const dayService = new DayService(playerRepository, voteRepository, logger, voteRoundRepository);
+  const phaseService = new PhaseService(gameRepository, nightResolutionService, votingService, gameFinalizationService, config, logger, playerRepository, dayService);
   const testGameService = new TestGameService(lobbyService, gameService, playerRepository, nightActionRepository, votingService, phaseService, logger);
   const ephemeralAdapter = new TelegramEphemeralAdapter(config.botToken, logger);
   const nightActionService = new NightActionService(gameRepository, playerRepository, nightActionRepository, ephemeralAdapter, logger);
@@ -73,7 +77,9 @@ async function main(): Promise<void> {
     try {
       await bot.api.editMessageText(game.chatId, game.controlMessageId, renderClosedVoteView({
         outcome: resolution.resolution.outcome,
-        ...(resolution.eliminatedPlayer === null ? {} : { eliminatedDisplayName: resolution.eliminatedPlayer.displayName }),
+        ...(resolution.roundKind === undefined ? {} : { kind: resolution.roundKind }),
+        eliminatedDisplayNames: resolution.eliminatedPlayers.map((player) => player.displayName),
+        alibiedDisplayNames: resolution.alibiedPlayers.map((player) => player.displayName),
         voteDetails: resolution.voteDetails,
       }), { reply_markup: { inline_keyboard: [] } });
     } catch {
@@ -82,11 +88,10 @@ async function main(): Promise<void> {
   };
   const publishNightStart = async (game: Game): Promise<void> => {
     if (game.phase === 'NIGHT_PROSTITUTE') {
-      const controlMessage = await bot.api.sendMessage(
-        game.chatId,
-        '🌙 Ночная очередь началась. Сначала действует Шлюха; после её действия ночь продолжится автоматически.',
-      );
+      const view = renderProstituteNightControl();
+      const controlMessage = await bot.api.sendMessage(game.chatId, view.text, { reply_markup: view.replyMarkup });
       await gameRepository.setControlMessageId(game.id, controlMessage.message_id);
+      await nightActionService.deliverNightPanels(game);
       return;
     }
     if (game.phase !== 'NIGHT') {
@@ -112,8 +117,9 @@ async function main(): Promise<void> {
       const text = renderNightEvent({
         gameId: result.game.id,
         phaseVersion: result.game.stateVersion,
-        eliminatedDisplayName: result.resolution.eliminatedPlayer?.displayName ?? null,
-        savedDisplayName: result.resolution.savedPlayer?.displayName ?? null,
+        eliminatedDisplayNames: result.resolution.eliminatedPlayers.map((player) => player.displayName),
+        savedDisplayNames: result.resolution.savedPlayers.map((player) => player.displayName),
+        eliminatedManiacDisplayName: result.resolution.eliminatedManiacPlayer?.displayName ?? null,
       });
       await bot.api.sendMessage(result.game.chatId, text);
       await bot.api.sendMessage(result.game.chatId, renderDayDiscussion());
@@ -126,7 +132,18 @@ async function main(): Promise<void> {
       await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
     }
     if (result.kind === 'DAY_REVOTE_STARTED') {
-      const controlMessage = await bot.api.sendMessage(result.game.chatId, '🗳️ Время повторного голосования среди сохранённых кандидатов.');
+      await testGameService.castVirtualVotes(result.game);
+      const view = await dayService.renderVote(result.game);
+      const controlMessage = await bot.api.sendMessage(result.game.chatId, view.text, { reply_markup: view.replyMarkup });
+      await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+    }
+    if (result.kind === 'DAY_TIE_DISCUSSION_STARTED') {
+      const controlMessage = await bot.api.sendMessage(result.game.chatId, '🤝 Первый тур завершился ничьей. У города есть 30 секунд на обсуждение перед повторным голосованием.');
+      await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
+    }
+    if (result.kind === 'DAY_FINAL_DECISION_STARTED') {
+      const view = await dayService.renderVote(result.game);
+      const controlMessage = await bot.api.sendMessage(result.game.chatId, view.text, { reply_markup: view.replyMarkup });
       await gameRepository.setControlMessageId(result.game.id, controlMessage.message_id);
     }
     if (result.kind === 'DAY_NOMINATION_EXPIRED' || result.kind === 'DAY_REVOTE_EXPIRED' || result.kind === 'DAY_FINAL_DECISION_EXPIRED') {
@@ -150,8 +167,9 @@ async function main(): Promise<void> {
         const dawnText = renderNightEvent({
           gameId: result.game.id,
           phaseVersion: result.game.stateVersion,
-          eliminatedDisplayName: result.nightResolution.eliminatedPlayer?.displayName ?? null,
-          savedDisplayName: result.nightResolution.savedPlayer?.displayName ?? null,
+          eliminatedDisplayNames: result.nightResolution.eliminatedPlayers.map((player) => player.displayName),
+          savedDisplayNames: result.nightResolution.savedPlayers.map((player) => player.displayName),
+          eliminatedManiacDisplayName: result.nightResolution.eliminatedManiacPlayer?.displayName ?? null,
         });
         await bot.api.sendMessage(result.game.chatId, dawnText);
       }

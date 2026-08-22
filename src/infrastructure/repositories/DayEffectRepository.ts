@@ -51,6 +51,16 @@ export class DayEffectRepository {
     return consumed;
   }
 
+  public async listActiveProstituteAlibiPlayerIds(gameId: string): Promise<string[]> {
+    this.logger.debug({ gameId }, '[DayEffectRepository.listActiveProstituteAlibiPlayerIds] Loading active day effects');
+    const effects = await this.prisma.dayEffect.findMany({
+      where: { gameId, kind: DayEffectKind.PROSTITUTE_ALIBI, consumedAt: null },
+      select: { playerId: true },
+    });
+    this.logger.info({ gameId, activeEffectCount: effects.length }, '[DayEffectRepository.listActiveProstituteAlibiPlayerIds] Active day effects loaded');
+    return effects.map((effect) => effect.playerId);
+  }
+
   public async clearUnconsumedProstituteAlibis(gameId: string): Promise<number> {
     this.logger.debug({ gameId }, '[DayEffectRepository.clearUnconsumedProstituteAlibis] Clearing expired day effects');
     const update = await this.prisma.dayEffect.updateMany({

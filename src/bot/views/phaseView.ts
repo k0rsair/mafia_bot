@@ -18,3 +18,10 @@ export function renderNightControl(): Readonly<{ text: string; replyMarkup: Inli
     replyMarkup: { inline_keyboard: [] },
   };
 }
+
+export function renderProstituteNightControl(): Readonly<{ text: string; replyMarkup: InlineKeyboardMarkup }> {
+  return {
+    text: '🌙 Ночная очередь началась. Личная панель Шлюхи отправлена автоматически; после её действия откроются остальные ночные панели.',
+    replyMarkup: { inline_keyboard: [] },
+  };
+}

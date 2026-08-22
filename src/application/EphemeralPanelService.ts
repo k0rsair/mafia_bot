@@ -47,7 +47,7 @@ export class EphemeralPanelService {
 
   public async openPanel(input: PanelCallbackInput): Promise<RoleConfirmationResult> {
     const game = await this.gameRepository.findById(input.gameId);
-    if (game?.phase === 'NIGHT' && game.stateVersion === input.phaseVersion) {
+    if ((game?.phase === 'NIGHT' || game?.phase === 'NIGHT_PROSTITUTE') && game.stateVersion === input.phaseVersion) {
       await this.nightActionService.openNightPanel(input);
       return { nightStarted: false };
     }
@@ -99,7 +99,7 @@ export class EphemeralPanelService {
     }
 
     const panelInput = { ...input, phaseVersion: game.stateVersion };
-    if (game.phase === 'NIGHT') {
+    if (game.phase === 'NIGHT' || game.phase === 'NIGHT_PROSTITUTE') {
       await this.nightActionService.openNightPanel(panelInput);
       this.logger.info({ gameId: game.id, phase: game.phase }, '[EphemeralPanelService.restorePanel] Personal panel restored');
       return;

@@ -14,6 +14,7 @@ export class VoteRepository {
     voterPlayerId: string;
     targetPlayerId: string | null;
     voteRoundId?: string;
+    isSkip?: boolean;
   }>): Promise<Vote> {
     this.logger.debug({ gameId: input.gameId, phaseVersion: input.phaseVersion, hasRound: input.voteRoundId !== undefined }, '[VoteRepository.upsertVote] Saving vote');
     const vote = await this.prisma.vote.upsert({
@@ -29,12 +30,12 @@ export class VoteRepository {
         phaseVersion: input.phaseVersion,
         voterPlayerId: input.voterPlayerId,
         targetPlayerId: input.targetPlayerId,
-        isSkip: input.targetPlayerId === null,
+        isSkip: input.isSkip ?? input.targetPlayerId === null,
         voteRoundId: input.voteRoundId ?? null,
       },
       update: {
         targetPlayerId: input.targetPlayerId,
-        isSkip: input.targetPlayerId === null,
+        isSkip: input.isSkip ?? input.targetPlayerId === null,
         voteRoundId: input.voteRoundId ?? null,
       },
     });

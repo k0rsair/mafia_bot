@@ -97,7 +97,7 @@ export class NightActionRepository {
     phaseVersion: number;
     actionType: NightActionType;
     actorPlayerId: string;
-    targetPlayerId: string;
+    targetPlayerId: string | null;
   }>): Promise<NightAction | null> {
     try {
       const action = await this.prisma.nightAction.create({

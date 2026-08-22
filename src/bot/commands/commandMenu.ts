@@ -6,6 +6,8 @@ export const BOT_COMMANDS: readonly BotCommand[] = [
   { command: 'mafia', description: 'Создать лобби игры' },
   { command: 'startgame', description: 'Начать игру' },
   { command: 'startvote', description: 'Начать голосование' },
+  { command: 'closenominations', description: 'Закрыть номинации' },
+  { command: 'closevote', description: 'Закрыть городской раунд' },
   { command: 'mafia_status', description: 'Показать текущую фазу' },
   { command: 'roles_pending', description: 'Кто не подтвердил роль' },
   { command: 'restore_panel', description: 'Вернуть личную панель' },

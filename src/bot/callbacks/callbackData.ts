@@ -1,6 +1,6 @@
 export type LobbyCallbackAction = 'join' | 'leave' | 'start';
 
-export type GameCallbackAction = 'panel' | 'confirm' | 'mafia-confirm' | 'target';
+export type GameCallbackAction = 'panel' | 'confirm' | 'mafia-confirm' | 'target' | 'don-check' | 'maniac-skip';
 
 export type GameCallback = Readonly<{
   kind: 'game';
@@ -14,7 +14,7 @@ export type VoteCallback = Readonly<{
   kind: 'vote';
   gameId: string;
   phaseVersion: number;
-  action: 'candidate' | 'skip';
+  action: 'candidate' | 'all-leave' | 'all-stay';
   targetIndex?: number;
 }>;
 
@@ -53,6 +53,14 @@ export function encodeNightTargetCallback(gameId: string, phaseVersion: number, 
   return `g:${gameId}:${phaseVersion.toString(36)}:target:${encodeTargetIndex(targetIndex)}`;
 }
 
+export function encodeDonCheckCallback(gameId: string, phaseVersion: number, targetIndex: number): string {
+  return `g:${gameId}:${phaseVersion.toString(36)}:don-check:${encodeTargetIndex(targetIndex)}`;
+}
+
+export function encodeManiacSkipCallback(gameId: string, phaseVersion: number): string {
+  return encodeGameCallback(gameId, phaseVersion, 'maniac-skip');
+}
+
 export function parseGameCallback(value: string): GameCallback | null {
   const [kind, gameId, phaseVersionValue, action, targetIndexValue, extra] = value.split(':');
   const phaseVersion = phaseVersionValue === undefined ? Number.NaN : Number.parseInt(phaseVersionValue, 36);
@@ -60,11 +68,12 @@ export function parseGameCallback(value: string): GameCallback | null {
     return null;
   }
 
-  if (action !== 'target' && targetIndexValue !== undefined) {
+  const needsTarget = action === 'target' || action === 'don-check';
+  if (!needsTarget && targetIndexValue !== undefined) {
     return null;
   }
 
-  if (action === 'target') {
+  if (needsTarget) {
     const targetIndex = parseTargetIndex(targetIndexValue);
     return targetIndex === null ? null : { kind: 'game', gameId, phaseVersion, action, targetIndex };
   }
@@ -72,10 +81,12 @@ export function parseGameCallback(value: string): GameCallback | null {
   return { kind: 'game', gameId, phaseVersion, action };
 }
 
-export function encodeVoteCallback(gameId: string, phaseVersion: number, targetIndex: number | null): string {
-  return targetIndex === null
-    ? `v:${gameId}:${phaseVersion.toString(36)}:skip`
-    : `v:${gameId}:${phaseVersion.toString(36)}:candidate:${encodeTargetIndex(targetIndex)}`;
+export function encodeVoteCallback(gameId: string, phaseVersion: number, targetIndex: number): string {
+  return `v:${gameId}:${phaseVersion.toString(36)}:candidate:${encodeTargetIndex(targetIndex)}`;
+}
+
+export function encodeFinalDecisionCallback(gameId: string, phaseVersion: number, action: 'all-leave' | 'all-stay'): string {
+  return `v:${gameId}:${phaseVersion.toString(36)}:${action}`;
 }
 
 export function parseVoteCallback(value: string): VoteCallback | null {
@@ -89,7 +100,7 @@ export function parseVoteCallback(value: string): VoteCallback | null {
   if (action === 'candidate' && targetIndex !== null && targetIndex !== undefined) {
     return { kind: 'vote', gameId, phaseVersion, action, targetIndex };
   }
-  if (action === 'skip' && targetIndexValue === undefined) {
+  if ((action === 'all-leave' || action === 'all-stay') && targetIndexValue === undefined) {
     return { kind: 'vote', gameId, phaseVersion, action };
   }
 
@@ -101,7 +112,7 @@ function isLobbyAction(value: string | undefined): value is LobbyCallbackAction 
 }
 
 function isGameAction(value: string | undefined): value is GameCallbackAction {
-  return value === 'panel' || value === 'confirm' || value === 'mafia-confirm' || value === 'target';
+  return value === 'panel' || value === 'confirm' || value === 'mafia-confirm' || value === 'target' || value === 'don-check' || value === 'maniac-skip';
 }
 
 function encodeTargetIndex(index: number): string {
