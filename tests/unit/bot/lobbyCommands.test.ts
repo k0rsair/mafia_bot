@@ -10,6 +10,8 @@ type CommandHandler = (context: Context) => Promise<unknown>;
 type HandlerSetup = Readonly<{
   getCommand: (name: string) => CommandHandler;
   getActiveGame: ReturnType<typeof vi.fn>;
+  getActiveLobby: ReturnType<typeof vi.fn>;
+  recordLobbyMessage: ReturnType<typeof vi.fn>;
   listUnconfirmedRolePlayers: ReturnType<typeof vi.fn>;
   restorePanel: ReturnType<typeof vi.fn>;
   restoreVotePanel: ReturnType<typeof vi.fn>;
@@ -23,6 +25,8 @@ type HandlerSetup = Readonly<{
 function setupHandlers(game: Game | null, testGameEnabled: boolean = false): HandlerSetup {
   const handlers = new Map<string, CommandHandler>();
   const getActiveGame = vi.fn().mockResolvedValue(game);
+  const getActiveLobby = vi.fn().mockResolvedValue(null);
+  const recordLobbyMessage = vi.fn().mockResolvedValue(undefined);
   const listUnconfirmedRolePlayers = vi.fn().mockResolvedValue([{ userId: 'player-2', displayName: 'Игрок 2' }]);
   const restorePanel = vi.fn().mockResolvedValue(undefined);
   const restoreVotePanel = vi.fn().mockResolvedValue(undefined);
@@ -45,7 +49,7 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
   } as unknown as Bot<Context>;
 
   registerLobbyHandlers(bot, {
-    lobbyService: { getActiveGame, listUnconfirmedRolePlayers },
+    lobbyService: { getActiveGame, getActiveLobby, listUnconfirmedRolePlayers, recordLobbyMessage },
     gameService: { recordControlMessage },
     phaseService: {},
     dayService: {},
@@ -67,6 +71,8 @@ function setupHandlers(game: Game | null, testGameEnabled: boolean = false): Han
       return handler;
     },
     getActiveGame,
+    getActiveLobby,
+    recordLobbyMessage,
     listUnconfirmedRolePlayers,
     restorePanel,
     restoreVotePanel,
@@ -235,5 +241,36 @@ describe('role confirmation commands', () => {
     expect(handlers.recordControlMessage).toHaveBeenCalledWith('test-game', 1);
     expect(handlers.deliverRolePanels).toHaveBeenCalledWith(expect.objectContaining({ id: 'test-game' }));
     expect(editMessageText).toHaveBeenCalledWith(-1001, 1, expect.stringContaining('Восемь виртуальных игроков уже подтвердили роли.'), expect.objectContaining({ reply_markup: expect.any(Object) }));
+  });
+});
+
+describe('mafia_status lobby control', () => {
+  it('republishes an open lobby with join, leave and start buttons', async () => {
+    const lobbyGame = { id: 'game-1', chatId: '-1001', creatorId: '101', phase: 'LOBBY', stateVersion: 1 } as Game;
+    const handlers = setupHandlers(null);
+    handlers.getActiveLobby.mockResolvedValue({
+      game: lobbyGame,
+      players: [{ id: 'player-1', userId: '101', displayName: 'Организатор' }],
+    });
+    const { context, reply } = createGroupContext(101);
+
+    await handlers.getCommand('mafia_status')(context);
+
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining('Лобби «Мафии» открыто'),
+      expect.objectContaining({
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '✅ Участвовать', callback_data: 'l:game-1:join' },
+              { text: '🚪 Выйти', callback_data: 'l:game-1:leave' },
+            ],
+            [{ text: '▶️ Начать игру', callback_data: 'l:game-1:start' }],
+          ],
+        },
+      }),
+    );
+    expect(handlers.recordLobbyMessage).toHaveBeenCalledWith(lobbyGame.id, 1);
+    expect(handlers.getActiveGame).not.toHaveBeenCalled();
   });
 });
